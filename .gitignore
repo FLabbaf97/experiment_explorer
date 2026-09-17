@@ -1,0 +1,15 @@
+.cache/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+.env
+.env.*
+mcp.json
+*.pem
+*.key
+credentials.json
+aws_credentials
+.aws/
