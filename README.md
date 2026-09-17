@@ -1,15 +1,31 @@
 # Experiment Explorer MCP
 
-MCP server for exploring phage-match ML experiments stored in S3 (`phage-match-ml-experiments`). It lists experiment folders, downloads them to a local cache, and exposes metrics/config files for analysis and plotting in Cursor.
+MCP server for exploring phage-match ML experiments stored in S3 (`phage-match-ml-experiments`). It lists experiment folders, downloads them to a local cache, and exposes metrics/config files for analysis and plotting in Cursor or Claude Code.
 
 ## Setup
 
-### 1. Create the isolated environment
+### 1. Install the server
+
+From this directory, create the isolated conda environment (installs the package editable via `pip`):
 
 ```bash
 cd experiment_explorer
 conda env create -f environment.yml
 conda activate experiment-explorer-mcp
+```
+
+If the environment already exists, update the install with:
+
+```bash
+conda activate experiment-explorer-mcp
+pip install -e .
+```
+
+Confirm the Python used by MCP is the conda env interpreter:
+
+```bash
+which python
+# example: ~/miniconda3/envs/experiment-explorer-mcp/bin/python
 ```
 
 ### 2. Configure AWS credentials
@@ -23,7 +39,7 @@ aws login
 
 ### 3. Register the MCP server in Cursor
 
-Add to `~/.cursor/mcp.json` (see `mcp.json.example`):
+Add the block below to `~/.cursor/mcp.json` (see `mcp.json.example`). Replace the Python path and cache directory with your machine’s paths.
 
 ```json
 {
@@ -40,7 +56,30 @@ Add to `~/.cursor/mcp.json` (see `mcp.json.example`):
 }
 ```
 
-Restart Cursor after updating MCP settings.
+Restart Cursor after updating MCP settings. In **Settings → MCP**, `experiment_explorer` should appear as connected.
+
+### 4. Register the MCP server in Claude Code
+
+Add the same stdio server with the Claude Code CLI. Use the **absolute** path to the conda env Python:
+
+```bash
+claude mcp add --transport stdio \
+  --env EXPERIMENT_EXPLORER_S3_BUCKET=phage-match-ml-experiments \
+  --env EXPERIMENT_EXPLORER_CACHE_DIR=/path/to/experiment_explorer/.cache \
+  experiment_explorer -- \
+  /path/to/miniconda3/envs/experiment-explorer-mcp/bin/python -m experiment_explorer
+```
+
+- User-wide (default): omit `--scope`, or pass `--scope user`.
+- This repo only: add `--scope project` (writes `.mcp.json` in the project).
+
+Check that it is registered:
+
+```bash
+claude mcp list
+```
+
+Restart Claude Code after adding the server. You can also paste the same JSON as in `mcp.json.example` into Claude Code MCP settings if you prefer the UI over the CLI.
 
 ## Tools
 
@@ -96,4 +135,4 @@ conda activate experiment-explorer-mcp
 python -m experiment_explorer
 ```
 
-The server communicates over stdio (standard MCP transport for Cursor).
+The server communicates over stdio (standard MCP transport for Cursor and Claude Code).
