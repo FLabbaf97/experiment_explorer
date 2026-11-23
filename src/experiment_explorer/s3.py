@@ -11,6 +11,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError, LoginRefreshRequired
 
 from experiment_explorer.config import get_aws_region
+from experiment_explorer.paths import resolve_within
 
 LOGGER = logging.getLogger(__name__)
 AWS_LOGIN_MESSAGE = "AWS session expired. Reauthenticate with `aws login` and retry."
@@ -130,6 +131,15 @@ def list_objects(
     return objects
 
 
+def _download_path(destination: Path, relative_key: str) -> Path | None:
+    """Return the local path for a key, or None if it escapes the destination."""
+    try:
+        local_path = resolve_within(destination, relative_key)
+    except ValueError:
+        return None
+    return None if local_path == destination.resolve() else local_path
+
+
 def download_prefix(
     bucket: str,
     prefix: str,
@@ -144,6 +154,7 @@ def download_prefix(
 
     downloaded: list[str] = []
     skipped: list[str] = []
+    blocked: list[str] = []
     total_bytes = 0
 
     try:
@@ -155,7 +166,11 @@ def download_prefix(
                     continue
 
                 relative_key = key[len(normalized_prefix) :]
-                local_path = destination / relative_key
+                local_path = _download_path(destination, relative_key)
+                if local_path is None:
+                    LOGGER.warning("Blocked unsafe S3 key: s3://%s/%s", bucket, key)
+                    blocked.append(key)
+                    continue
                 local_path.parent.mkdir(parents=True, exist_ok=True)
 
                 if (
@@ -179,8 +194,10 @@ def download_prefix(
         "local_path": str(destination),
         "downloaded_files": downloaded,
         "skipped_files": skipped,
+        "blocked_keys": blocked,
         "downloaded_count": len(downloaded),
         "skipped_count": len(skipped),
+        "blocked_count": len(blocked),
         "total_bytes": total_bytes,
     }
 

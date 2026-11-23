@@ -11,6 +11,7 @@ import pandas as pd
 import yaml
 
 from experiment_explorer.config import DOC_FILE_NAMES, METRICS_FILE_PATTERNS
+from experiment_explorer.paths import experiment_cache_path, resolve_within
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ CONFIG_FILE_NAME = "config.yaml"
 
 def resolve_experiment_path(cache_dir: Path, experiment_name: str) -> Path:
     """Resolve an experiment name to a local directory path."""
-    candidate = cache_dir / experiment_name
+    candidate = experiment_cache_path(cache_dir, experiment_name)
     if candidate.exists():
         return candidate
     raise FileNotFoundError(
@@ -58,11 +59,7 @@ def read_metrics_csv(
     experiment_dir: Path, relative_path: str, *, max_rows: int = 50
 ) -> dict[str, Any]:
     """Load a metrics CSV from a cached experiment."""
-    metrics_path = (experiment_dir / relative_path).resolve()
-    experiment_root = experiment_dir.resolve()
-
-    if not str(metrics_path).startswith(str(experiment_root)):
-        raise ValueError(f"Refusing to read path outside experiment directory: {relative_path}")
+    metrics_path = resolve_within(experiment_dir, relative_path)
 
     if not metrics_path.exists():
         raise FileNotFoundError(f"Metrics file not found: {relative_path}")
@@ -87,11 +84,7 @@ def read_metrics_csv(
 
 def read_config_yaml(experiment_dir: Path, relative_path: str) -> dict[str, Any]:
     """Load a YAML config file from a cached experiment."""
-    config_path = (experiment_dir / relative_path).resolve()
-    experiment_root = experiment_dir.resolve()
-
-    if not str(config_path).startswith(str(experiment_root)):
-        raise ValueError(f"Refusing to read path outside experiment directory: {relative_path}")
+    config_path = resolve_within(experiment_dir, relative_path)
 
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {relative_path}")

@@ -15,6 +15,7 @@ from experiment_explorer.experiment_scan import (
     resolve_experiment_path,
     scan_experiment,
 )
+from experiment_explorer.paths import experiment_cache_path, validate_experiment_name
 from experiment_explorer.s3 import (
     S3ExperimentError,
     download_prefix,
@@ -77,6 +78,11 @@ def list_experiment_files(experiment_name: str, max_files: int = 200) -> str:
     """
     bucket = get_s3_bucket()
     try:
+        experiment_name = validate_experiment_name(experiment_name)
+    except ValueError as exc:
+        return _json_response({"error": str(exc), "experiment_name": experiment_name})
+
+    try:
         objects = list_objects(bucket, experiment_name, max_keys=max_files)
         return _json_response(
             {
@@ -117,7 +123,11 @@ def fetch_experiment(experiment_name: str, force_refresh: bool = False) -> str:
     """
     bucket = get_s3_bucket()
     cache_dir = get_cache_dir()
-    destination = cache_dir / experiment_name
+    try:
+        experiment_name = validate_experiment_name(experiment_name)
+        destination = experiment_cache_path(cache_dir, experiment_name)
+    except ValueError as exc:
+        return _json_response({"error": str(exc), "experiment_name": experiment_name})
 
     try:
         result = download_prefix(
@@ -180,7 +190,7 @@ def summarize_experiment(experiment_name: str) -> str:
         experiment_dir = resolve_experiment_path(cache_dir, experiment_name)
         summary = scan_experiment(experiment_dir)
         return _json_response(summary)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         return _json_response({"error": str(exc), "experiment_name": experiment_name})
 
 

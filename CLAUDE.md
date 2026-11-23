@@ -28,7 +28,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Cache and S3 safety
 
 - Keep S3 access read-only.
-- Never call `fetch_experiment` with an empty `experiment_name`. It resolves to the bucket root and downloads the whole bucket.
+- Experiment names go through `validate_experiment_name` in `paths.py`, which rejects blank, root, absolute, and `..` names. Keep new tools on it.
+- `download_prefix` skips S3 keys that would land outside the experiment folder and reports them in `blocked_keys`.
 - Cache freshness is checked by file size only, and `force_refresh` does not remove files deleted from S3. Cached files can be stale.
 - A nonexistent experiment name creates an empty cache directory and reports success with 0 files.
 
