@@ -8,6 +8,7 @@ __pycache__/
 .env
 .env.*
 mcp.json
+.mcp.json
 *.pem
 *.key
 credentials.json
