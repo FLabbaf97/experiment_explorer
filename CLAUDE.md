@@ -35,9 +35,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Plot script
 
-- `scripts/plot_roc_pr_curves.py` needs `matplotlib` and `scikit-learn`, which are not declared in `pyproject.toml` or `environment.yml`.
+- `scripts/plot_roc_pr_curves.py` needs the `plot` extra: `pip install -e ".[plot]"`.
 - It ignores `EXPERIMENT_EXPLORER_CACHE_DIR`. Pass `--cache-dir` if the cache is not at `<repo>/.cache`.
-- Its figure title is hardcoded to the 2026-01-08 baseline, so plots of other experiments are mislabeled.
-- It requires `split_*/model_*/results_*` nesting and aborts if `cv_predictions.csv` is missing.
+- It plots `predictions/{test,cv}_predictions.csv` from any run folder and `predictions_normalized/<name>_{test,cv}.csv`. Experiments without per-sample predictions, such as `2026-09-16_*`, cannot be plotted.
 
 @AGENTS.md

@@ -128,6 +128,17 @@ experiment_name/
 │       └── artifacts/
 ```
 
+## Plotting
+
+Install the plot dependencies, then plot any cached experiment that has per-sample predictions:
+
+```bash
+pip install -e ".[plot]"
+python scripts/plot_roc_pr_curves.py --experiment-name 2026-07-16_ecoli_selected_features_holdout
+```
+
+Figures are saved to `<experiment>/plots` unless you pass `--output-dir`. The script reads `predictions/{test,cv}_predictions.csv` in run folders and `predictions_normalized/<name>_{test,cv}.csv`.
+
 ## Local development
 
 ```bash

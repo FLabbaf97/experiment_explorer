@@ -18,7 +18,11 @@ from sklearn.metrics import auc, precision_recall_curve, roc_curve
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[1] / ".cache"
-RUN_DIR_PATTERN = re.compile(r"results_(\d{8}_\d{6})(?:_star)?$")
+RUN_DIR_PATTERN = re.compile(r"_(\d{8}_\d{6})(?:_star)?$")
+NORMALIZED_FILE_PATTERN = re.compile(r"(?P<series>.+)_(?P<kind>test|cv)\.csv")
+PREDICTION_KINDS = ("test", "cv")
+LABEL_COLUMNS = ("y_true", "interaction")
+ROOT_GROUP = "root"
 
 MODEL_LABELS = {
     "model_xgboost": "XGBoost baseline",
@@ -63,47 +67,63 @@ def _run_sort_key(run_dir_name: str) -> tuple[int, str]:
     return starred, timestamp
 
 
+def _run_group_and_series(relative_parts: tuple[str, ...]) -> tuple[str, str]:
+    """Name a run's plot group and curve from the folders above it."""
+    parents = relative_parts[:-1]
+    if not parents:
+        return ROOT_GROUP, "run"
+    if len(parents) == 1:
+        return parents[0], parents[0]
+    return "/".join(parents[:-1]), parents[-1]
+
+
 def select_latest_runs(experiment_dir: Path) -> dict[tuple[str, str], Path]:
-    """Pick one run directory per (split, model) group."""
+    """Pick one run directory per (group, series), ignoring root runs if nested ones exist."""
     selected: dict[tuple[str, str], Path] = {}
 
-    for prediction_path in experiment_dir.rglob("predictions/test_predictions.csv"):
-        run_dir = prediction_path.parent.parent
-        relative_parts = run_dir.relative_to(experiment_dir).parts
+    for kind in PREDICTION_KINDS:
+        for prediction_path in experiment_dir.rglob(f"predictions/{kind}_predictions.csv"):
+            run_dir = prediction_path.parent.parent
+            key = _run_group_and_series(run_dir.relative_to(experiment_dir).parts)
+            current = selected.get(key)
+            if current is None or _run_sort_key(run_dir.name) > _run_sort_key(current.name):
+                selected[key] = run_dir
 
-        if len(relative_parts) == 1:
-            split_name = "root"
-            model_name = "model_xgboost"
-        elif relative_parts[0].startswith("split_") and relative_parts[1].startswith("model_"):
-            split_name = relative_parts[0]
-            model_name = relative_parts[1]
-        else:
-            continue
-
-        key = (split_name, model_name)
-        current = selected.get(key)
-        if current is None or _run_sort_key(run_dir.name) > _run_sort_key(current.name):
-            selected[key] = run_dir
-
+    if any(group != ROOT_GROUP for group, _ in selected):
+        selected = {key: run for key, run in selected.items() if key[0] != ROOT_GROUP}
     return selected
 
 
-def load_prediction_frame(run_dir: Path, prediction_kind: str) -> pd.DataFrame:
-    prediction_path = run_dir / "predictions" / f"{prediction_kind}_predictions.csv"
-    if not prediction_path.exists():
-        raise FileNotFoundError(f"Missing predictions file: {prediction_path}")
+def discover_curve_sources(experiment_dir: Path) -> dict[tuple[str, str], dict[str, Path]]:
+    """Map (group, kind) to the prediction file behind each curve."""
+    sources: dict[tuple[str, str], dict[str, Path]] = {}
 
+    for (group, series), run_dir in select_latest_runs(experiment_dir).items():
+        for kind in PREDICTION_KINDS:
+            prediction_path = run_dir / "predictions" / f"{kind}_predictions.csv"
+            if prediction_path.exists():
+                sources.setdefault((group, kind), {})[series] = prediction_path
+
+    for prediction_path in experiment_dir.rglob("predictions_normalized/*.csv"):
+        match = NORMALIZED_FILE_PATTERN.fullmatch(prediction_path.name)
+        if match is None:
+            continue
+        parent = prediction_path.parent.parent.relative_to(experiment_dir)
+        group = parent.as_posix() if parent.parts else ROOT_GROUP
+        sources.setdefault((group, match["kind"]), {})[match["series"]] = prediction_path
+
+    return sources
+
+
+def load_prediction_frame(prediction_path: Path) -> pd.DataFrame:
     frame = pd.read_csv(prediction_path)
 
-    if prediction_kind == "test":
-        if "ensemble" in frame["model_idx"].astype(str).unique():
-            frame = frame[frame["model_idx"].astype(str) == "ensemble"].copy()
-        label_col = "interaction"
-    else:
-        label_col = "y_true"
+    if "model_idx" in frame.columns and "ensemble" in frame["model_idx"].astype(str).unique():
+        frame = frame[frame["model_idx"].astype(str) == "ensemble"].copy()
 
-    if label_col not in frame.columns:
-        raise ValueError(f"Expected label column '{label_col}' in {prediction_path}")
+    label_col = next((col for col in LABEL_COLUMNS if col in frame.columns), None)
+    if label_col is None:
+        raise ValueError(f"Expected one of {LABEL_COLUMNS} in {prediction_path}")
 
     if "y_pred_proba" not in frame.columns:
         raise ValueError(f"Expected probability column in {prediction_path}")
@@ -130,6 +150,7 @@ def compute_curve_metrics(y_true: pd.Series, y_pred_proba: pd.Series) -> dict[st
 
 def plot_split_curves(
     *,
+    experiment_name: str,
     split_name: str,
     prediction_kind: str,
     run_map: dict[str, Path],
@@ -137,8 +158,8 @@ def plot_split_curves(
 ) -> None:
     fig, (roc_ax, pr_ax) = plt.subplots(1, 2, figsize=(13, 5))
 
-    for model_name, run_dir in sorted(run_map.items()):
-        frame = load_prediction_frame(run_dir, prediction_kind)
+    for model_name, prediction_path in sorted(run_map.items()):
+        frame = load_prediction_frame(prediction_path)
         metrics = compute_curve_metrics(frame["y_true"], frame["y_pred_proba"])
         label = MODEL_LABELS.get(model_name, model_name)
         color = MODEL_COLORS.get(model_name, None)
@@ -158,10 +179,13 @@ def plot_split_curves(
             label=f"{label} (AUC={metrics['pr_auc']:.3f})",
         )
 
-    split_label = split_name.replace("_", " ")
     prediction_label = "test" if prediction_kind == "test" else "cross-validation"
+    if split_name == ROOT_GROUP:
+        figure_label = prediction_label
+    else:
+        figure_label = f"{split_name.replace('_', ' ')} ({prediction_label})"
     roc_ax.plot([0, 1], [0, 1], "k--", lw=1, alpha=0.6, label="Random")
-    roc_ax.set_title(f"ROC — {split_label} ({prediction_label})")
+    roc_ax.set_title(f"ROC — {figure_label}")
     roc_ax.set_xlabel("False positive rate")
     roc_ax.set_ylabel("True positive rate")
     roc_ax.set_xlim(0, 1)
@@ -170,7 +194,7 @@ def plot_split_curves(
     roc_ax.legend(loc="lower right", fontsize=9)
 
     if run_map:
-        sample_frame = load_prediction_frame(next(iter(run_map.values())), prediction_kind)
+        sample_frame = load_prediction_frame(next(iter(run_map.values())))
         baseline = float(sample_frame["y_true"].mean())
         pr_ax.axhline(
             y=baseline,
@@ -181,7 +205,7 @@ def plot_split_curves(
             label=f"Baseline precision={baseline:.3f}",
         )
 
-    pr_ax.set_title(f"Precision-Recall — {split_label} ({prediction_label})")
+    pr_ax.set_title(f"Precision-Recall — {figure_label}")
     pr_ax.set_xlabel("Recall")
     pr_ax.set_ylabel("Precision")
     pr_ax.set_xlim(0, 1)
@@ -190,7 +214,7 @@ def plot_split_curves(
     pr_ax.legend(loc="lower left", fontsize=9)
 
     fig.suptitle(
-        f"2026-01-08 baseline run — {split_label} ({prediction_label})",
+        f"{experiment_name} — {figure_label}",
         fontsize=12,
         y=1.02,
     )
@@ -211,30 +235,26 @@ def main() -> int:
         return 1
 
     output_dir = args.output_dir or (experiment_dir / "plots")
-    selected_runs = select_latest_runs(experiment_dir)
-    if not selected_runs:
-        LOGGER.error("No test prediction files found under %s", experiment_dir)
+    curve_sources = discover_curve_sources(experiment_dir)
+    if not curve_sources:
+        LOGGER.error("No prediction files found under %s", experiment_dir)
         return 1
 
-    runs_by_split: dict[str, dict[str, Path]] = {}
-    for (split_name, model_name), run_dir in selected_runs.items():
-        runs_by_split.setdefault(split_name, {})[model_name] = run_dir
-
-    for split_name, model_runs in sorted(runs_by_split.items()):
-        if split_name == "root":
-            continue
-        for prediction_kind in ("test", "cv"):
-            output_name = f"{split_name}_{prediction_kind}_roc_pr.png"
-            plot_split_curves(
-                split_name=split_name,
-                prediction_kind=prediction_kind,
-                run_map=model_runs,
-                output_path=output_dir / output_name,
-            )
+    saved_names: list[str] = []
+    for (group, prediction_kind), series_paths in sorted(curve_sources.items()):
+        output_name = f"{group.replace('/', '__')}_{prediction_kind}_roc_pr.png"
+        plot_split_curves(
+            experiment_name=args.experiment_name,
+            split_name=group,
+            prediction_kind=prediction_kind,
+            run_map=series_paths,
+            output_path=output_dir / output_name,
+        )
+        saved_names.append(output_name)
 
     print(f"Saved ROC/PR plots to {output_dir}")
-    for plot_path in sorted(output_dir.glob("*.png")):
-        print(f"  - {plot_path.name}")
+    for name in saved_names:
+        print(f"  - {name}")
     return 0
 
 
