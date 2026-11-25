@@ -24,7 +24,7 @@ plot = [
 dev = [
     "moto[s3]>=5",
     "pytest>=8",
-    "ruff>=0.5",
+    "ruff>=0.15,<0.16",
 ]
 
 [project.scripts]

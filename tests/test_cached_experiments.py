@@ -1,6 +1,6 @@
 import pytest
 
-from conftest import RUN, write_experiment
+from helpers import RUN, write_experiment
 
 METRICS = f"{RUN}/results/test_results.csv"
 CONFIG = f"{RUN}/logs/config.yaml"
@@ -55,28 +55,25 @@ def test_read_config_returns_parsed_yaml(call_tool, cache_dir):
     assert result["content"] == {"model": "xgboost", "seed": 1}
 
 
-@pytest.mark.parametrize(
-    "relative_path",
-    [
-        "../exp_secret/secret.csv",
-        "/etc/hosts",
-        "link.csv",
-        f"{RUN}/../../../../exp_secret/secret.csv",
-    ],
-)
-def test_reads_cannot_leave_the_experiment(call_tool, cache_dir, relative_path):
+OUTSIDE_PATHS = {
+    "sibling": "../exp_secret/secret.{ext}",
+    "dot-dot": RUN + "/../../../../exp_secret/secret.{ext}",
+    "symlink": "link.{ext}",
+    "absolute": "{outside}/secret.{ext}",
+}
+
+
+@pytest.mark.parametrize("route", OUTSIDE_PATHS)
+def test_reads_cannot_leave_the_experiment(call_tool, cache_dir, tmp_path, route):
+    secrets = {"secret.csv": "a\n1\n", "secret.yaml": "a: 1\n"}
     write_experiment(cache_dir, "exp")
-    write_experiment(cache_dir, "exp_secret", {"secret.csv": "a\n1\n", "secret.yaml": "a: 1\n"})
-    (cache_dir / "exp" / "link.csv").symlink_to(cache_dir / "exp_secret" / "secret.csv")
+    write_experiment(cache_dir, "exp_secret", secrets)
+    outside = write_experiment(tmp_path, "outside", secrets)
+    for ext in ("csv", "yaml"):
+        (cache_dir / "exp" / f"link.{ext}").symlink_to(cache_dir / "exp_secret" / f"secret.{ext}")
 
-    metrics = call_tool(
-        "read_experiment_metrics", experiment_name="exp", relative_path=relative_path
-    )
-    config = call_tool(
-        "read_experiment_config",
-        experiment_name="exp",
-        relative_path=relative_path.replace(".csv", ".yaml"),
-    )
+    for tool, ext in (("read_experiment_metrics", "csv"), ("read_experiment_config", "yaml")):
+        relative_path = OUTSIDE_PATHS[route].format(ext=ext, outside=outside)
+        result = call_tool(tool, experiment_name="exp", relative_path=relative_path)
 
-    assert "error" in metrics
-    assert "error" in config
+        assert "outside" in result["error"], (tool, relative_path)

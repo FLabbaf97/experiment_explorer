@@ -1,4 +1,4 @@
-from conftest import BUCKET, STANDARD_EXPERIMENT, put_experiment
+from helpers import BUCKET, STANDARD_EXPERIMENT, put_experiment
 
 
 def test_list_experiments_shows_top_level_folders(call_tool, s3):
