@@ -71,19 +71,23 @@ def list_experiment_files(experiment_name: str, max_files: int = 200) -> str:
 
     Args:
       experiment_name: Top-level experiment folder name in the bucket.
-      max_files: Maximum number of files to return.
+      max_files: Maximum number of files to return (at least 1).
 
     Returns:
-      JSON with file keys, sizes, and last-modified timestamps.
+      JSON with file keys, sizes, and last-modified timestamps. `truncated` is
+      true only when the experiment has more files than were returned.
     """
     bucket = get_s3_bucket()
     try:
         experiment_name = validate_experiment_name(experiment_name)
+        if max_files < 1:
+            raise ValueError(f"max_files must be at least 1, got {max_files}")
     except ValueError as exc:
         return _json_response({"error": str(exc), "experiment_name": experiment_name})
 
     try:
-        objects = list_objects(bucket, experiment_name, max_keys=max_files)
+        listed = list_objects(bucket, experiment_name, max_keys=max_files + 1)
+        objects = listed[:max_files]
         return _json_response(
             {
                 "bucket": bucket,
@@ -99,7 +103,7 @@ def list_experiment_files(experiment_name: str, max_files: int = 200) -> str:
                     for obj in objects
                 ],
                 "count": len(objects),
-                "truncated": len(objects) >= max_files,
+                "truncated": len(listed) > max_files,
             }
         )
     except S3ExperimentError as exc:
@@ -204,16 +208,21 @@ def read_experiment_metrics(
     relative_path: str,
     max_rows: int = 50,
 ) -> str:
-    """Read a metrics CSV from a cached experiment.
+    """Preview a metrics CSV from a cached experiment.
+
+    This returns only the first `max_rows` rows. `row_count` is the total number of
+    rows in the file and `truncated` is true when the preview is partial. Do not
+    calculate averages, totals, or other statistics from a truncated preview: it is
+    not the whole file.
 
     Args:
       experiment_name: Name of a locally cached experiment folder.
       relative_path: Path to the CSV relative to the experiment root
         (e.g. results_20260108_154928/results/test_results.csv).
-      max_rows: Maximum number of preview rows to return.
+      max_rows: Maximum number of preview rows to return (at least 1).
 
     Returns:
-      JSON with columns, row count, and preview rows.
+      JSON with columns, row_count, rows_returned, truncated, and preview_rows.
     """
     cache_dir = get_cache_dir()
     try:
