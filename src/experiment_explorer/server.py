@@ -112,14 +112,18 @@ def list_experiment_files(experiment_name: str, max_files: int = 200) -> str:
 
 @mcp.tool
 def fetch_experiment(experiment_name: str, force_refresh: bool = False) -> str:
-    """Download an experiment folder from S3 into the local cache.
+    """Download an experiment folder from S3 into the local cache, or bring it up to date.
+
+    Files that changed in S3 are downloaded again; unchanged files are skipped.
 
     Args:
       experiment_name: Top-level experiment folder name in the bucket.
-      force_refresh: Re-download files even if they already exist locally.
+      force_refresh: Re-download every file, and remove cached files that were
+        deleted from S3. Without it, such files are only listed in `missing_in_s3`.
 
     Returns:
-      JSON with local cache path and download statistics.
+      JSON with the local cache path, downloaded/skipped/removed/blocked files,
+      and a summary of the experiment.
     """
     bucket = get_s3_bucket()
     cache_dir = get_cache_dir()

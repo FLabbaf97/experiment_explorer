@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,8 @@ from experiment_explorer.paths import resolve_within
 
 LOGGER = logging.getLogger(__name__)
 AWS_LOGIN_MESSAGE = "AWS session expired. Reauthenticate with `aws login` and retry."
+# Records the S3 ETag and size of each downloaded file, so changes are detected.
+MANIFEST_NAME = ".s3_manifest.json"
 
 
 class S3ExperimentError(RuntimeError):
@@ -140,8 +143,35 @@ def list_objects(
     return objects
 
 
+def _load_manifest(destination: Path) -> dict[str, dict[str, Any]]:
+    path = destination / MANIFEST_NAME
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        LOGGER.warning("Ignoring unreadable cache manifest at %s", path)
+        return {}
+
+
+def _save_manifest(destination: Path, manifest: dict[str, dict[str, Any]]) -> None:
+    path = destination / MANIFEST_NAME
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _prune_empty_dirs(directory: Path, stop: Path) -> None:
+    """Remove empty folders from directory upwards, never removing stop itself."""
+    stop = stop.resolve()
+    directory = directory.resolve()
+    while directory != stop and directory.is_relative_to(stop) and not any(directory.iterdir()):
+        directory.rmdir()
+        directory = directory.parent
+
+
 def _download_path(destination: Path, relative_key: str) -> Path | None:
     """Return the local path for a key, or None if it escapes the destination."""
+    if relative_key == MANIFEST_NAME:
+        return None
     try:
         local_path = resolve_within(destination, relative_key)
     except ValueError:
@@ -163,6 +193,8 @@ def download_prefix(
     downloaded: list[str] = []
     skipped: list[str] = []
     blocked: list[str] = []
+    removed: list[str] = []
+    missing_in_s3: list[str] = []
     total_bytes = 0
 
     try:
@@ -173,6 +205,7 @@ def download_prefix(
                 f"s3://{bucket}/{normalized_prefix}). Use list_experiments to see valid names."
             )
         destination.mkdir(parents=True, exist_ok=True)
+        manifest = _load_manifest(destination)
 
         for obj in objects:
             relative_key = obj.key[len(normalized_prefix) :]
@@ -183,14 +216,35 @@ def download_prefix(
                 continue
             local_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if skip_existing and local_path.exists() and local_path.stat().st_size == obj.size_bytes:
+            entry = manifest.get(relative_key, {})
+            unchanged = (
+                entry.get("etag") == obj.etag
+                and local_path.exists()
+                and local_path.stat().st_size == obj.size_bytes
+            )
+            if skip_existing and unchanged:
                 skipped.append(relative_key)
                 continue
 
             LOGGER.info("Downloading s3://%s/%s -> %s", bucket, obj.key, local_path)
             client.download_file(bucket, obj.key, str(local_path))
+            manifest[relative_key] = {"etag": obj.etag, "size": obj.size_bytes}
+            _save_manifest(destination, manifest)
             downloaded.append(relative_key)
             total_bytes += obj.size_bytes
+
+        in_s3 = {obj.key[len(normalized_prefix) :] for obj in objects}
+        for relative_key in sorted(set(manifest) - in_s3):
+            if skip_existing:
+                missing_in_s3.append(relative_key)
+                continue
+            local_path = _download_path(destination, relative_key)
+            if local_path is not None and local_path.is_file():
+                local_path.unlink()
+                _prune_empty_dirs(local_path.parent, destination)
+            del manifest[relative_key]
+            removed.append(relative_key)
+        _save_manifest(destination, manifest)
     except S3ExperimentError:
         raise
     except Exception as exc:
@@ -203,9 +257,12 @@ def download_prefix(
         "downloaded_files": downloaded,
         "skipped_files": skipped,
         "blocked_keys": blocked,
+        "removed_files": removed,
+        "missing_in_s3": missing_in_s3,
         "downloaded_count": len(downloaded),
         "skipped_count": len(skipped),
         "blocked_count": len(blocked),
+        "removed_count": len(removed),
         "total_bytes": total_bytes,
     }
 

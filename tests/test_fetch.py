@@ -72,3 +72,44 @@ def test_fetch_unknown_experiment_returns_error_and_leaves_no_folder(call_tool, 
     assert "not found" in result["error"]
     assert not (cache_dir / "typo_exp").exists()
     assert call_tool("list_cached_experiments")["experiments"] == []
+
+
+def test_fetch_redownloads_a_changed_file_of_the_same_size(call_tool, s3, cache_dir):
+    put_experiment(s3, "exp", {"metrics.csv": "a\n1\n"})
+    call_tool("fetch_experiment", experiment_name="exp")
+    put_experiment(s3, "exp", {"metrics.csv": "a\n2\n"})
+
+    result = call_tool("fetch_experiment", experiment_name="exp")
+
+    assert result["downloaded_files"] == ["metrics.csv"]
+    assert (cache_dir / "exp" / "metrics.csv").read_text() == "a\n2\n"
+
+
+def test_forced_refresh_removes_files_deleted_from_s3_but_keeps_local_files(
+    call_tool, s3, cache_dir
+):
+    put_experiment(s3, "exp", {"keep.csv": "a\n1\n", "old/gone.csv": "a\n1\n"})
+    call_tool("fetch_experiment", experiment_name="exp")
+    (cache_dir / "exp" / "my_notes.md").write_text("local only")
+    s3.delete_object(Bucket=BUCKET, Key="exp/old/gone.csv")
+
+    result = call_tool("fetch_experiment", experiment_name="exp", force_refresh=True)
+
+    assert result["removed_files"] == ["old/gone.csv"]
+    assert not (cache_dir / "exp" / "old").exists()
+    assert (cache_dir / "exp" / "keep.csv").exists()
+    assert (cache_dir / "exp" / "my_notes.md").read_text() == "local only"
+
+
+def test_normal_fetch_reports_files_deleted_from_s3_without_removing_them(
+    call_tool, s3, cache_dir
+):
+    put_experiment(s3, "exp", {"keep.csv": "a\n1\n", "gone.csv": "a\n1\n"})
+    call_tool("fetch_experiment", experiment_name="exp")
+    s3.delete_object(Bucket=BUCKET, Key="exp/gone.csv")
+
+    result = call_tool("fetch_experiment", experiment_name="exp")
+
+    assert result["missing_in_s3"] == ["gone.csv"]
+    assert result["removed_files"] == []
+    assert (cache_dir / "exp" / "gone.csv").exists()
