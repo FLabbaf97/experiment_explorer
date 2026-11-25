@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, LoginRefreshRequired
@@ -21,6 +21,10 @@ class S3ExperimentError(RuntimeError):
     """Raised when S3 operations for experiments fail."""
 
 
+class ExperimentNotFoundError(S3ExperimentError):
+    """Raised when an experiment prefix has no files in the bucket."""
+
+
 @dataclass(frozen=True)
 class S3ObjectInfo:
     """Metadata for a single S3 object."""
@@ -28,6 +32,7 @@ class S3ObjectInfo:
     key: str
     size_bytes: int
     last_modified: str
+    etag: str = ""
 
 
 def _create_s3_client() -> Any:
@@ -98,33 +103,37 @@ def list_folder_prefixes(bucket: str, prefix: str = "") -> list[str]:
     return sorted(folders)
 
 
+def _iter_objects(client: Any, bucket: str, normalized_prefix: str) -> Iterator[S3ObjectInfo]:
+    """Yield every file (not folder marker) under a normalized prefix."""
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
+        for item in page.get("Contents", []):
+            if item["Key"].endswith("/"):
+                continue
+            yield S3ObjectInfo(
+                key=item["Key"],
+                size_bytes=int(item.get("Size", 0)),
+                last_modified=item["LastModified"].isoformat(),
+                etag=item.get("ETag", ""),
+            )
+
+
 def list_objects(
     bucket: str,
     prefix: str,
     *,
     max_keys: int = 500,
 ) -> list[S3ObjectInfo]:
-    """List files under an S3 prefix."""
+    """List up to max_keys files under an S3 prefix."""
     normalized_prefix = _normalize_prefix(prefix)
     client = _create_s3_client()
-    paginator = client.get_paginator("list_objects_v2")
 
     objects: list[S3ObjectInfo] = []
     try:
-        for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
-            for item in page.get("Contents", []):
-                key = item["Key"]
-                if key.endswith("/"):
-                    continue
-                objects.append(
-                    S3ObjectInfo(
-                        key=key,
-                        size_bytes=int(item.get("Size", 0)),
-                        last_modified=item["LastModified"].isoformat(),
-                    )
-                )
-                if len(objects) >= max_keys:
-                    return objects
+        for obj in _iter_objects(client, bucket, normalized_prefix):
+            if len(objects) >= max_keys:
+                break
+            objects.append(obj)
     except Exception as exc:
         _handle_s3_exception(exc, bucket=bucket, prefix=prefix, action="list")
 
@@ -149,7 +158,6 @@ def download_prefix(
 ) -> dict[str, Any]:
     """Download all objects under an S3 prefix into a local directory."""
     normalized_prefix = _normalize_prefix(prefix)
-    destination.mkdir(parents=True, exist_ok=True)
     client = _create_s3_client()
 
     downloaded: list[str] = []
@@ -158,33 +166,33 @@ def download_prefix(
     total_bytes = 0
 
     try:
-        paginator = client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
-            for item in page.get("Contents", []):
-                key = item["Key"]
-                if key.endswith("/"):
-                    continue
+        objects = list(_iter_objects(client, bucket, normalized_prefix))
+        if not objects:
+            raise ExperimentNotFoundError(
+                f"Experiment '{prefix}' was not found in bucket '{bucket}' (no files under "
+                f"s3://{bucket}/{normalized_prefix}). Use list_experiments to see valid names."
+            )
+        destination.mkdir(parents=True, exist_ok=True)
 
-                relative_key = key[len(normalized_prefix) :]
-                local_path = _download_path(destination, relative_key)
-                if local_path is None:
-                    LOGGER.warning("Blocked unsafe S3 key: s3://%s/%s", bucket, key)
-                    blocked.append(key)
-                    continue
-                local_path.parent.mkdir(parents=True, exist_ok=True)
+        for obj in objects:
+            relative_key = obj.key[len(normalized_prefix) :]
+            local_path = _download_path(destination, relative_key)
+            if local_path is None:
+                LOGGER.warning("Blocked unsafe S3 key: s3://%s/%s", bucket, obj.key)
+                blocked.append(obj.key)
+                continue
+            local_path.parent.mkdir(parents=True, exist_ok=True)
 
-                if (
-                    skip_existing
-                    and local_path.exists()
-                    and local_path.stat().st_size == item.get("Size", 0)
-                ):
-                    skipped.append(relative_key)
-                    continue
+            if skip_existing and local_path.exists() and local_path.stat().st_size == obj.size_bytes:
+                skipped.append(relative_key)
+                continue
 
-                LOGGER.info("Downloading s3://%s/%s -> %s", bucket, key, local_path)
-                client.download_file(bucket, key, str(local_path))
-                downloaded.append(relative_key)
-                total_bytes += int(item.get("Size", 0))
+            LOGGER.info("Downloading s3://%s/%s -> %s", bucket, obj.key, local_path)
+            client.download_file(bucket, obj.key, str(local_path))
+            downloaded.append(relative_key)
+            total_bytes += obj.size_bytes
+    except S3ExperimentError:
+        raise
     except Exception as exc:
         _handle_s3_exception(exc, bucket=bucket, prefix=prefix, action="download from")
 

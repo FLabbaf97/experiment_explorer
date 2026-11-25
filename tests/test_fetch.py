@@ -62,3 +62,13 @@ def test_fetch_blocks_keys_that_escape_the_experiment_folder(call_tool, s3, cach
     assert result["downloaded_files"] == ["safe.csv"]
     assert not (tmp_path / "escaped.txt").exists()
     assert not (cache_dir / "escaped.txt").exists()
+
+
+def test_fetch_unknown_experiment_returns_error_and_leaves_no_folder(call_tool, s3, cache_dir):
+    put_experiment(s3, "exp")
+
+    result = call_tool("fetch_experiment", experiment_name="typo_exp")
+
+    assert "not found" in result["error"]
+    assert not (cache_dir / "typo_exp").exists()
+    assert call_tool("list_cached_experiments")["experiments"] == []
