@@ -1,10 +1,14 @@
 """Every tool failure returns {"error": ...} instead of crashing (issue #2)."""
 
+import asyncio
+import json
 import logging
 import os
 
 import pytest
+from fastmcp import Client
 
+from experiment_explorer.server import mcp
 from helpers import put_experiment, write_experiment
 
 
@@ -81,3 +85,34 @@ def test_expected_errors_are_not_logged_as_crashes(call_tool, s3, cache_dir, cap
         call_tool("read_experiment_metrics", experiment_name="exp", relative_path="x.csv")
 
     assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+def test_malformed_metrics_csv_is_an_expected_error(call_tool, cache_dir, caplog):
+    write_experiment(cache_dir, "exp", {"bad.csv": 'a,b\n1,"unterminated\n'})
+
+    with caplog.at_level(logging.WARNING):
+        result = call_tool(
+            "read_experiment_metrics", experiment_name="exp", relative_path="bad.csv"
+        )
+
+    assert result["error"]
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+def test_server_keeps_answering_after_a_failure(cache_dir):
+    write_experiment(cache_dir, "exp", {"bad.yaml": "a: [1\n", "good.yaml": "a: 1\n"})
+
+    async def two_calls() -> list[dict]:
+        async with Client(mcp) as client:
+            replies = []
+            for path in ("bad.yaml", "good.yaml"):
+                result = await client.call_tool(
+                    "read_experiment_config", {"experiment_name": "exp", "relative_path": path}
+                )
+                replies.append(json.loads(result.content[0].text))
+            return replies
+
+    bad, good = asyncio.run(two_calls())
+
+    assert bad["error"]
+    assert good["content"] == {"a": 1}

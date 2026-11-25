@@ -60,14 +60,20 @@ def test_file_listing_rejects_limits_below_one(call_tool, s3, max_files):
     assert "max_files" in result["error"]
 
 
-def test_metrics_tool_tells_the_model_not_to_calculate_from_previews():
+@pytest.mark.parametrize(
+    ("tool", "warning"),
+    [
+        ("read_experiment_metrics", "do not calculate"),
+        ("list_experiment_files", "do not count or total"),
+    ],
+)
+def test_partial_tools_tell_the_model_not_to_calculate_from_partial_results(tool, warning):
     async def description() -> str:
         async with Client(mcp) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
-            return tools["read_experiment_metrics"].description
+            return tools[tool].description
 
-    text = asyncio.run(description()).lower()
+    text = " ".join(asyncio.run(description()).lower().split())
 
-    assert "preview" in text
-    assert "row_count" in text
-    assert "not" in text and "calculat" in text
+    assert warning in text
+    assert "truncated" in text

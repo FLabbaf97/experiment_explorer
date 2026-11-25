@@ -27,6 +27,15 @@ class S3ExperimentError(RuntimeError):
 class ExperimentNotFoundError(S3ExperimentError):
     """Raised when an experiment prefix has no files in the bucket."""
 
+    def __init__(self, bucket: str, experiment_name: str, removed_count: int = 0) -> None:
+        cleanup = (
+            f"; removed {removed_count} cached file(s) that came from S3" if removed_count else ""
+        )
+        super().__init__(
+            f"Experiment '{experiment_name}' was not found in bucket '{bucket}'{cleanup}. "
+            "Use list_experiments to see valid names."
+        )
+
 
 @dataclass(frozen=True)
 class S3ObjectInfo:
@@ -148,10 +157,20 @@ def _load_manifest(destination: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         LOGGER.warning("Ignoring unreadable cache manifest at %s", path)
         return {}
+    if not isinstance(raw, dict):
+        LOGGER.warning("Ignoring malformed cache manifest at %s", path)
+        return {}
+    return {
+        key: entry
+        for key, entry in raw.items()
+        if isinstance(entry, dict)
+        and isinstance(entry.get("etag"), str)
+        and isinstance(entry.get("size"), int)
+    }
 
 
 def _save_manifest(destination: Path, manifest: dict[str, dict[str, Any]]) -> None:
@@ -166,6 +185,27 @@ def _prune_empty_dirs(directory: Path, stop: Path) -> None:
     while directory != stop and directory.is_relative_to(stop) and not any(directory.iterdir()):
         directory.rmdir()
         directory = directory.parent
+
+
+def _remove_deleted_files(
+    destination: Path, manifest: dict[str, dict[str, Any]], in_s3: set[str]
+) -> list[str]:
+    """Delete cached files that left S3, but only if they are still what we downloaded."""
+    removed: list[str] = []
+    for relative_key in sorted(set(manifest) - in_s3):
+        entry = manifest.pop(relative_key)
+        local_path = _download_path(destination, relative_key)
+        if (
+            local_path is None
+            or not local_path.is_file()
+            or local_path.stat().st_size != entry["size"]
+        ):
+            LOGGER.warning("Not removing %s: it no longer matches the S3 copy", relative_key)
+            continue
+        local_path.unlink()
+        _prune_empty_dirs(local_path.parent, destination)
+        removed.append(relative_key)
+    return removed
 
 
 def _download_path(destination: Path, relative_key: str) -> Path | None:
@@ -198,17 +238,21 @@ def download_prefix(
     total_bytes = 0
 
     try:
-        objects = list(_iter_objects(client, bucket, normalized_prefix))
+        objects = {
+            obj.key[len(normalized_prefix) :]: obj
+            for obj in _iter_objects(client, bucket, normalized_prefix)
+        }
         if not objects:
-            raise ExperimentNotFoundError(
-                f"Experiment '{prefix}' was not found in bucket '{bucket}' (no files under "
-                f"s3://{bucket}/{normalized_prefix}). Use list_experiments to see valid names."
-            )
+            removed_count = 0
+            if not skip_existing and destination.is_dir():
+                manifest = _load_manifest(destination)
+                removed_count = len(_remove_deleted_files(destination, manifest, set()))
+                _save_manifest(destination, manifest)
+            raise ExperimentNotFoundError(bucket, prefix, removed_count)
         destination.mkdir(parents=True, exist_ok=True)
         manifest = _load_manifest(destination)
 
-        for obj in objects:
-            relative_key = obj.key[len(normalized_prefix) :]
+        for relative_key, obj in objects.items():
             local_path = _download_path(destination, relative_key)
             if local_path is None:
                 LOGGER.warning("Blocked unsafe S3 key: s3://%s/%s", bucket, obj.key)
@@ -233,20 +277,11 @@ def download_prefix(
             downloaded.append(relative_key)
             total_bytes += obj.size_bytes
 
-        in_s3 = {obj.key[len(normalized_prefix) :] for obj in objects}
-        for relative_key in sorted(set(manifest) - in_s3):
-            if skip_existing:
-                missing_in_s3.append(relative_key)
-                continue
-            local_path = _download_path(destination, relative_key)
-            if local_path is not None and local_path.is_file():
-                local_path.unlink()
-                _prune_empty_dirs(local_path.parent, destination)
-            del manifest[relative_key]
-            removed.append(relative_key)
+        if skip_existing:
+            missing_in_s3 = sorted(set(manifest) - set(objects))
+        else:
+            removed = _remove_deleted_files(destination, manifest, set(objects))
         _save_manifest(destination, manifest)
-    except S3ExperimentError:
-        raise
     except Exception as exc:
         _handle_s3_exception(exc, bucket=bucket, prefix=prefix, action="download from")
 
@@ -263,6 +298,7 @@ def download_prefix(
         "skipped_count": len(skipped),
         "blocked_count": len(blocked),
         "removed_count": len(removed),
+        "missing_in_s3_count": len(missing_in_s3),
         "total_bytes": total_bytes,
     }
 

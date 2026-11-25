@@ -72,7 +72,6 @@ def read_metrics_csv(
     try:
         frame = pd.read_csv(metrics_path)
     except Exception as exc:
-        LOGGER.exception("Failed to read metrics CSV", extra={"path": str(metrics_path)})
         raise ValueError(f"Failed to parse CSV at {relative_path}: {exc}") from exc
 
     preview = frame.head(max_rows)

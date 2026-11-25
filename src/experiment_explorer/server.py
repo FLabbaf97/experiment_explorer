@@ -20,6 +20,7 @@ from experiment_explorer.experiment_scan import (
 )
 from experiment_explorer.paths import experiment_cache_path, validate_experiment_name
 from experiment_explorer.s3 import (
+    ExperimentNotFoundError,
     S3ExperimentError,
     download_prefix,
     list_folder_prefixes,
@@ -105,13 +106,15 @@ def list_experiments(prefix: str = "") -> str:
 def list_experiment_files(experiment_name: str, max_files: int = 200) -> str:
     """List files for one experiment prefix in S3.
 
+    Returns at most `max_files` files. When `truncated` is true the listing is
+    partial, so do not count or total files from it.
+
     Args:
       experiment_name: Top-level experiment folder name in the bucket.
       max_files: Maximum number of files to return (at least 1).
 
     Returns:
-      JSON with file keys, sizes, and last-modified timestamps. `truncated` is
-      true only when the experiment has more files than were returned.
+      JSON with file keys, sizes, last-modified timestamps, and `truncated`.
     """
     bucket = get_s3_bucket()
     experiment_name = validate_experiment_name(experiment_name)
@@ -119,6 +122,8 @@ def list_experiment_files(experiment_name: str, max_files: int = 200) -> str:
         raise ValueError(f"max_files must be at least 1, got {max_files}")
 
     listed = list_objects(bucket, experiment_name, max_keys=max_files + 1)
+    if not listed:
+        raise ExperimentNotFoundError(bucket, experiment_name)
     objects = listed[:max_files]
     return _json_response(
         {
