@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Never write to stdout from `src/`. It carries the stdio protocol. Log through the module-level `LOGGER`, which goes to stderr.
 - Tools return a JSON string through `_json_response` in `server.py`.
-- Expected failures return `{"error": ...}` rather than raising.
+- Expected failures return `{"error": ...}` rather than raising. Put `@_returns_errors` directly under `@mcp.tool` on every tool; it converts exceptions to error responses and logs unexpected ones with a traceback. Tools can simply raise `ValueError`, `OSError`, or `S3ExperimentError` for bad input.
 
 ## Data layout
 
@@ -31,8 +31,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Keep S3 access read-only.
 - Experiment names go through `validate_experiment_name` in `paths.py`, which rejects blank, root, absolute, and `..` names. Keep new tools on it.
 - `download_prefix` skips S3 keys that would land outside the experiment folder and reports them in `blocked_keys`.
-- Cache freshness is checked by file size only, and `force_refresh` does not remove files deleted from S3. Cached files can be stale.
-- A nonexistent experiment name creates an empty cache directory and reports success with 0 files.
+- Each cached experiment has a `.s3_manifest.json` recording the S3 ETag of every downloaded file. A file is re-downloaded when its ETag changes; files cached before the manifest existed are re-downloaded once.
+- Only files listed in the manifest are ever deleted: `force_refresh` removes them when they disappear from S3, and a normal fetch reports them in `missing_in_s3`. Local-only files are never touched.
+- Fetching an experiment with no files in S3 returns a not-found error and creates nothing in the cache.
 
 ## Plot script
 

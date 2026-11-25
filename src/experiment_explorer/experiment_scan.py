@@ -58,7 +58,9 @@ def scan_experiment(experiment_dir: Path) -> dict[str, Any]:
 def read_metrics_csv(
     experiment_dir: Path, relative_path: str, *, max_rows: int = 50
 ) -> dict[str, Any]:
-    """Load a metrics CSV from a cached experiment."""
+    """Load a metrics CSV from a cached experiment and return a preview of its rows."""
+    if max_rows < 1:
+        raise ValueError(f"max_rows must be at least 1, got {max_rows}")
     metrics_path = resolve_within(experiment_dir, relative_path)
 
     if not metrics_path.exists():
@@ -70,14 +72,15 @@ def read_metrics_csv(
     try:
         frame = pd.read_csv(metrics_path)
     except Exception as exc:
-        LOGGER.exception("Failed to read metrics CSV", extra={"path": str(metrics_path)})
         raise ValueError(f"Failed to parse CSV at {relative_path}: {exc}") from exc
 
     preview = frame.head(max_rows)
     return {
         "path": relative_path,
         "columns": list(frame.columns),
-        "row_count": int(len(frame)),
+        "row_count": len(frame),
+        "rows_returned": len(preview),
+        "truncated": len(preview) < len(frame),
         "preview_rows": json.loads(preview.to_json(orient="records")),
     }
 
