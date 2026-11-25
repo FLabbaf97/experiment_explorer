@@ -146,4 +146,12 @@ conda activate experiment-explorer-mcp
 python -m experiment_explorer
 ```
 
+Run the tests and linter (no AWS access needed; S3 is faked):
+
+```bash
+pip install -e ".[dev]"
+ruff check .
+pytest
+```
+
 The server communicates over stdio (standard MCP transport for Cursor and Claude Code).

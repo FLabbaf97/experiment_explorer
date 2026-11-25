@@ -11,8 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Verifying changes
 
-- There are no tests or CI. Verify changes by running the affected code, and say what was not run.
-- Ruff is configured (line length 100, target py310) but is not a declared dependency. Install it separately to run `ruff check .`.
+- The conda environment includes the test tools (`.[dev]`). Run `ruff check .` and `pytest`. CI runs both on every push and pull request.
+- Tests run against a fake S3 (moto) and a temporary cache, so they need no AWS access. Test tool behaviour through the `call_tool` fixture, the way an MCP client does. Pure helpers such as the name validator can be tested directly.
+- Add or update tests with every behaviour change.
 
 ## MCP server rules
 
