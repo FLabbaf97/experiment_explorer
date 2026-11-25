@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Never write to stdout from `src/`. It carries the stdio protocol. Log through the module-level `LOGGER`, which goes to stderr.
 - Tools return a JSON string through `_json_response` in `server.py`.
-- Expected failures return `{"error": ...}` rather than raising.
+- Expected failures return `{"error": ...}` rather than raising. Put `@_returns_errors` directly under `@mcp.tool` on every tool; it converts exceptions to error responses and logs unexpected ones with a traceback. Tools can simply raise `ValueError`, `OSError`, or `S3ExperimentError` for bad input.
 
 ## Data layout
 
