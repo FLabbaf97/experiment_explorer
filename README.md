@@ -18,7 +18,7 @@ If the environment already exists, update the install with:
 
 ```bash
 conda activate experiment-explorer-mcp
-pip install -e .
+pip install -e ".[plot,dev]"
 ```
 
 Confirm the Python used by MCP is the conda env interpreter:
@@ -63,15 +63,17 @@ Restart Cursor after updating MCP settings. In **Settings → MCP**, `experiment
 Add the same stdio server with the Claude Code CLI. Use the **absolute** path to the conda env Python:
 
 ```bash
-claude mcp add --transport stdio \
+claude mcp add --transport stdio experiment_explorer \
   --env EXPERIMENT_EXPLORER_S3_BUCKET=phage-match-ml-experiments \
   --env EXPERIMENT_EXPLORER_CACHE_DIR=/path/to/experiment_explorer/.cache \
-  experiment_explorer -- \
-  /path/to/miniconda3/envs/experiment-explorer-mcp/bin/python -m experiment_explorer
+  -- /path/to/miniconda3/envs/experiment-explorer-mcp/bin/python -m experiment_explorer
 ```
 
-- User-wide (default): omit `--scope`, or pass `--scope user`.
-- This repo only: add `--scope project` (writes `.mcp.json` in the project).
+Keep the server name before `--env`: `--env` takes every value up to the next option, so a name placed after it is read as a malformed variable.
+
+- Only you, only the current project (default): omit `--scope`, or pass `--scope local`.
+- You, in every project: add `--scope user`.
+- Everyone working in the current project: add `--scope project` (writes `.mcp.json` there, which can be committed).
 
 Check that it is registered:
 

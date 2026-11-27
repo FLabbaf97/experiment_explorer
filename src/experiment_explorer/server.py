@@ -30,14 +30,19 @@ from experiment_explorer.s3 import (
 )
 
 LOGGER = logging.getLogger("experiment_explorer")
-mcp = FastMCP(
-    name="Experiment Explorer",
-    instructions=(
+
+
+def _server_instructions() -> str:
+    """Describe the server, naming the bucket this process is configured to use."""
+    return (
         "Tools for listing and fetching phage-match ML experiments from S3 "
-        "(bucket: phage-match-ml-experiments), then inspecting metrics and configs "
-        "from the local cache for plotting and analysis."
-    ),
-)
+        f"(bucket: {get_s3_bucket()}), then inspecting metrics, configs, reports and "
+        "other files from the local cache for plotting and analysis."
+    )
+
+
+# The configuration is read once, from the environment the server process starts with.
+mcp = FastMCP(name="Experiment Explorer", instructions=_server_instructions())
 
 # Failures caused by bad input, missing files, or S3 access. They are returned to the
 # caller as {"error": ...} and logged without a traceback. Anything else is a bug.
