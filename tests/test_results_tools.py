@@ -241,6 +241,49 @@ def test_a_run_without_a_headline_is_listed_with_a_reason(call_tool, cache_dir):
     assert "summarize_run" in results[no_headline]["reason"]
 
 
+def test_folders_that_only_look_like_runs_are_not_runs(call_tool, cache_dir):
+    # results_<name> without a timestamp wraps runs; run_<timestamp> is a sweep wrapper.
+    inner = "results_XGBoost_known_phage/results_20260101_000000"
+    files = run_files(inner) | run_files("sweep/run_20260102_000000/results_20260102_000000")
+    write_experiment(cache_dir, "wrap", files)
+
+    result = call_tool("compare_runs", experiment_name="wrap")
+
+    runs = [
+        run
+        for folder in result["folders"]
+        for group in folder["setup_groups"]
+        for entry in group["entries"]
+        for run in entry["runs"]
+    ]
+    assert sorted(runs) == [inner, "sweep/run_20260102_000000/results_20260102_000000"]
+    assert all(folder["incomplete_runs"] == [] for folder in result["folders"])
+
+
+def test_production_runs_are_named_but_not_compared(call_tool, cache_dir):
+    production = "holdout/production/production_20260102_000000"
+    files = run_files(run_path("20260101_000000"))
+    files[f"{production}/results/test_metrics.csv"] = "roc_auc\n0.7\n"
+    write_experiment(cache_dir, "prod", files)
+
+    result = call_tool("compare_runs", experiment_name="prod")
+
+    assert result["run_count"] == 1
+    assert result["runs_not_compared"]["runs"] == [production]
+    assert "production" in result["runs_not_compared"]["reason"]
+
+
+def test_an_experiment_with_only_production_runs_says_so(call_tool, cache_dir):
+    write_experiment(
+        cache_dir, "prod", {"p/production_20260102_000000/results/test_metrics.csv": "a\n1\n"}
+    )
+
+    error = call_tool("compare_runs", experiment_name="prod")["error"]
+
+    assert "1 production run(s)" in error
+    assert "summarize_experiment" in error
+
+
 def test_compare_can_be_limited_to_one_folder(call_tool, comparison, cache_dir):
     write_experiment(cache_dir, "cmp", run_files("other/results_20260101_000000"))
 

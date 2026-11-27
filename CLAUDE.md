@@ -24,8 +24,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Data layout
 
-- A run directory is `results_*` containing `results/`. Configs are files named exactly `config.yaml`.
-- Metrics are recognized by exact filename at any depth: `cv_results.csv`, `test_results.csv`, `cv_per_bacteria_results.csv`, `test_per_bacteria_results.csv`.
+- Experiments mix layouts (runs, production/LOBO runs, comparisons, analyses, GenoPHI, learning curves). Each file gets a role (report, metrics, predictions, config, figure, code, model, log, data, other) from ordered glob rules in `src/experiment_explorer/layout_rules.yaml`; first match wins (docs/adr/0003). Support a new layout by editing the rules, not the scanning code. `EXPERIMENT_EXPLORER_LAYOUT_RULES` adds a project's rules file, checked first.
+- A run folder is `<kind>_YYYYMMDD_HHMMSS[_star]` with a kind listed in the rules (`results`, `production`). `run_*` sweep wrappers and timestamp-less `results_<name>` folders are not runs. The calculation tools compare `results` runs only; `compare_runs` names production runs in `runs_not_compared`.
+- The original layout's `summarize_experiment` keys (`docs`, `run_directories`, `metrics_files`, `prediction_files`, `config_files`) must not change; `tests/test_layouts.py` pins them. Add a fixture there for every new layout.
 
 ## Cache and S3 safety
 

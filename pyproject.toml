@@ -35,6 +35,9 @@ experiment-explorer-mcp = "experiment_explorer.server:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+experiment_explorer = ["layout_rules.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]

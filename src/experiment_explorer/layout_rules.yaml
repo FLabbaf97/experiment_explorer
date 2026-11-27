@@ -1,0 +1,125 @@
+# Which role each file in an experiment plays, and which folders are runs (docs/adr/0003).
+#
+# Roles are checked in order and the first matching rule wins, so specific rules come
+# before broad ones. A pattern is a shell-style glob matched, ignoring case, against
+# "/" + the file's path inside the experiment, and `*` also matches "/". So "*/models/*"
+# matches models/a.pkl and x/models/a.pkl, and "*.md" matches a Markdown file at any depth.
+# A file no rule matches has the role "other".
+#
+# Another project can add rules without editing this file: point
+# EXPERIMENT_EXPLORER_LAYOUT_RULES at a YAML file in this format. Its roles are checked
+# before these, and its run_folder section, if present, replaces this one.
+
+roles:
+  # Saved models and what is needed to use them.
+  - role: model
+    match:
+      - "*.pkl"
+      - "*.pickle"
+      - "*.joblib"
+      - "*.cbm"
+      - "*.pt"
+      - "*.pth"
+      - "*.onnx"
+      - "*.h5"
+      - "*/models/*"
+      - "*/autogluon/*"
+      - "*/autogluon_output/*"
+      - "*/artifacts/*"
+
+  - role: figure
+    match:
+      - "*.png"
+      - "*.jpg"
+      - "*.jpeg"
+      - "*.svg"
+      - "*.gif"
+      - "*.pdf"
+      - "*.html"
+
+  - role: code
+    match:
+      - "*.py"
+      - "*.sh"
+      - "*.bash"
+      - "*.ipynb"
+      - "*.r"
+      - "*.pyc"
+
+  # Before log, so logs/config.yaml is a config.
+  - role: config
+    match:
+      - "*config*.yaml"
+      - "*config*.yml"
+      - "*config*.json"
+      - "*/conf/*.yaml"
+      - "*manifest*.json"
+      - "*manifest*.txt"
+
+  - role: log
+    match:
+      - "*.log"
+      - "*nohup.out"
+      - "*.pid"
+      - "*/logs/*"
+      - "*/catboost_info/*"
+
+  - role: report
+    match:
+      - "*.md"
+      - "*.markdown"
+      - "*report*.txt"
+
+  - role: predictions
+    match:
+      - "*/predictions/*.csv"
+      - "*/predictions_normalized/*.csv"
+      - "*predictions*.csv"
+      - "*_preds.csv"
+      - "*_inference.csv"
+      - "*/evaluation_pairs.csv"
+
+  # Inputs to the experiment.
+  - role: data
+    match:
+      - "*/data/*"
+      - "*/input_data/*"
+      - "*/merged/*"
+      - "*/merged_features/*"
+      - "*/filtered_feature_tables/*"
+      - "*.parquet"
+      - "*.ods"
+      - "*.xlsx"
+      - "*.xls"
+
+  # Computed results: metric tables, summaries and analysis outputs.
+  - role: metrics
+    match:
+      - "*/results/*"
+      - "*/metrics/*"
+      - "*/outputs/*"
+      - "*/external_evaluation/*"
+      - "*metrics*.csv"
+      - "*metrics*.json"
+      - "*results*.csv"
+      - "*results*.json"
+      - "*leaderboard*.csv"
+      - "*summary*.csv"
+      - "*summary*.json"
+      - "*summary*.txt"
+      - "*model_performance*"
+      - "*feature_importance*"
+      - "*features_occurrence*"
+      - "*best_cutoff*"
+      - "*report*.csv"
+      - "*report*.json"
+      - "*/feature_selection/*"
+
+# A run folder is named <kind>_YYYYMMDD_HHMMSS, with an optional _star, and its kind is
+# listed below. Wrappers such as run_YYYYMMDD_HHMMSS and folders such as
+# results_XGBoost_known_phage are not runs.
+run_folder:
+  name_pattern: '^(?P<kind>[A-Za-z]+)_\d{8}_\d{6}(?P<star>_star)?$'
+  kinds:
+    - results
+    - production

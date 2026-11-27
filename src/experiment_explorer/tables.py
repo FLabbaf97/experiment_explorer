@@ -23,12 +23,14 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from experiment_explorer import layout
 from experiment_explorer.paths import resolve_within
 
 ENSEMBLE = "ensemble"
 PARTITIONS = ("test", "cv")
 KINDS = ("results", "per_bacteria", "predictions")
 RUN_PREFIX = "results_"
+RESULTS_KIND = "results"
 STAR_SUFFIX = "_star"
 
 ID_COLUMNS = ("bacteria", "phage", "model_idx")
@@ -198,17 +200,19 @@ class RunStatus:
 
 
 def find_runs(experiment_dir: Path, folder: str | None = None) -> list[str]:
-    """Relative paths of every run folder (``results_*``), including incomplete runs."""
+    """Relative paths of every results run (``results_<timestamp>``), including incomplete runs.
+
+    Production runs are left out; ``find_run_folders`` lists every kind of run.
+    """
+    return [run.path for run in find_run_folders(experiment_dir, folder) if run.kind == RESULTS_KIND]
+
+
+def find_run_folders(experiment_dir: Path, folder: str | None = None) -> list[layout.RunFolder]:
+    """Every run folder of any kind (results, production), as the layout rules define them."""
     root = resolve_within(experiment_dir, folder) if folder else experiment_dir.resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Folder not found in experiment: {folder}")
-    base = experiment_dir.resolve()
-    runs = [
-        path.relative_to(base).as_posix()
-        for path in root.rglob(f"{RUN_PREFIX}*")
-        if path.is_dir() and not path.is_symlink()
-    ]
-    return sorted(runs)
+    return layout.find_run_folders(experiment_dir, root)
 
 
 def resolve_run(experiment_dir: Path, run: str) -> Path:

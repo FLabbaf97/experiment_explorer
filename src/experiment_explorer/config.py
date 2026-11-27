@@ -7,12 +7,6 @@ from pathlib import Path
 
 DEFAULT_S3_BUCKET = "phage-match-ml-experiments"
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / ".cache"
-METRICS_FILE_PATTERNS = (
-    "cv_results.csv",
-    "test_results.csv",
-    "cv_per_bacteria_results.csv",
-    "test_per_bacteria_results.csv",
-)
 # Written reports and READMEs, found at any depth.
 DOC_FILE_SUFFIXES = (".md", ".markdown")
 
@@ -28,6 +22,14 @@ def get_cache_dir() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     return DEFAULT_CACHE_DIR.resolve()
+
+
+def get_layout_rules_path() -> Path | None:
+    """Return the project's extra layout rules file, if one is configured."""
+    configured = os.environ.get("EXPERIMENT_EXPLORER_LAYOUT_RULES")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return None
 
 
 def get_aws_region() -> str | None:
