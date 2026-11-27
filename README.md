@@ -94,17 +94,23 @@ Restart Claude Code after adding the server. You can also paste the same JSON as
 | `summarize_experiment` | Find reports and READMEs at any depth, run dirs, metrics, predictions, configs |
 | `list_cached_files` | List every file in a cached experiment with its size |
 | `read_cached_file` | Read a Markdown, text, JSON, YAML or log file (size-limited; binaries are never opened) |
-| `read_experiment_metrics` | Load a metrics CSV (preview rows) |
+| `read_experiment_metrics` | Preview a metrics CSV (first rows only; not for calculations) |
 | `read_experiment_config` | Load a YAML config file |
+| `compare_runs` | List an experiment's runs grouped by evaluation setup, with config differences and headline metrics (never ranked) |
+| `summarize_run` | A run's headline metrics and their spread across ensemble members and CV folds |
+| `bacteria_metrics` | Per-bacteria answers: one bacterium's metrics, stats across bacteria, threshold counts, best/worst N |
+| `prediction_metrics` | ROC AUC, average precision, precision, recall, F1, MCC and confusion matrix from every prediction, optionally per bacteria, phage or fold |
+
+The four calculation tools read every row of a file and say how many rows they used. For calculations they don't cover, import the same loader in your own Python: `from experiment_explorer.tables import load_table`. The `skills/experiment-results` skill tells Claude when to use each tool and the rules of the data. Terms are defined in `GLOSSARY.md`, and design decisions are recorded in `docs/adr/`.
 
 ## Typical workflow
 
 1. `list_experiments` — browse available runs in S3
 2. `fetch_experiment` with `experiment_name="2026-04-20_Baseline"`
-3. `summarize_experiment` — discover metrics file paths
-4. `read_experiment_metrics` — inspect `test_results.csv`, etc.
-5. `list_cached_files` / `read_cached_file` — read written reports, notes and JSON summaries
-6. Use the returned data for plotting or further analysis
+3. `compare_runs` — see the experiment's runs, how they differ, and their headline metrics
+4. `summarize_run`, `bacteria_metrics`, `prediction_metrics` — answer questions from every row
+5. `summarize_experiment` / `read_experiment_config` — discover files and read configs
+6. `list_cached_files` / `read_cached_file` — read written reports, notes and JSON summaries
 
 ## Environment variables
 
