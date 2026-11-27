@@ -223,6 +223,24 @@ def test_a_group_without_test_results_everywhere_uses_cv(call_tool, cache_dir):
     )
 
 
+def test_a_run_without_a_headline_is_listed_with_a_reason(call_tool, cache_dir):
+    # Several test rows and no ensemble row, and no CV: neither gives one figure.
+    no_headline = run_path("20260102_000000")
+    files = run_files(run_path("20260101_000000"), seed=1, max_depth=3)
+    files |= run_files(no_headline, seed=2, cv=False)
+    files[f"{no_headline}/results/test_results.csv"] = "roc_auc,avg_precision\n0.7,0.5\n0.8,0.6\n"
+    write_experiment(cache_dir, "nohead", files)
+
+    group = only_folder(call_tool("compare_runs", experiment_name="nohead"))["setup_groups"][0]
+
+    assert group["partition"] is None
+    results = {entry["runs"][0]: entry["results"] for entry in group["entries"]}
+    assert results[run_path("20260101_000000")]["partition"] == "test"
+    assert results[no_headline]["partition"] is None
+    assert results[no_headline]["roc_auc"] is None
+    assert "summarize_run" in results[no_headline]["reason"]
+
+
 def test_compare_can_be_limited_to_one_folder(call_tool, comparison, cache_dir):
     write_experiment(cache_dir, "cmp", run_files("other/results_20260101_000000"))
 

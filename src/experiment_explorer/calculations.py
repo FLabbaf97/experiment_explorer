@@ -21,6 +21,10 @@ CV_BOOKKEEPING_COLUMNS = frozenset({"train_size", "val_size", "fold", "val_featu
 PREDICTION_SUMMARY_METRICS = ("roc_auc", "average_precision", "precision", "recall", "f1", "mcc")
 SINGLE_CLASS = "single class: ROC AUC and average precision need both positives and negatives"
 NO_Y_PRED = "the file has no y_pred column, so threshold metrics cannot be computed"
+NO_HEADLINE = (
+    "no single figure: the test file has several rows and no ensemble row, and the run "
+    "has no CV results; use summarize_run to see its rows"
+)
 
 
 # --- Small helpers ---------------------------------------------------------------
@@ -242,14 +246,25 @@ def _run_record(experiment_dir: Path, run: str) -> dict[str, Any]:
     return record
 
 
+def _own_headline(headlines: dict[str, Any]) -> dict[str, Any]:
+    """The run's own headline: test if it has one, else CV, else none with a reason."""
+    for partition in ("test", "cv"):
+        if headlines[partition]:
+            return {"partition": partition, **headlines[partition]}
+    return {
+        "partition": None,
+        **_headline_pair({}),
+        "reason": NO_HEADLINE,
+    }
+
+
 def _entry_results(records: list[dict[str, Any]], partition: str | None) -> dict[str, Any]:
     by_run: dict[str, Any] = {}
     for record in records:
         if partition is not None:
             by_run[record["run"]] = {"partition": partition, **record["headlines"][partition]}
         else:
-            own = "test" if record["headlines"]["test"] else "cv"
-            by_run[record["run"]] = {"partition": own, **record["headlines"][own]}
+            by_run[record["run"]] = _own_headline(record["headlines"])
     distinct = {tables.canonical(value) for value in by_run.values()}
     if len(distinct) == 1:
         return {"results": next(iter(by_run.values())), "repeats_agree": len(by_run) > 1 or None}
@@ -303,7 +318,7 @@ def _setup_group(
         group["note"] = "These runs have no config.yaml, so their evaluation setup is unknown."
     if partition is None:
         group["note"] = (
-            "Some runs here have only test results and others only CV results, so no single "
+            "Not every run here has the same kind of headline (test or CV), so no single "
             "figure is shared. Each result says which it is; do not compare them directly."
         )
     return group
