@@ -44,6 +44,18 @@ def test_read_cached_file_returns_text_files_at_any_depth(call_tool, cache_dir, 
 
 
 @pytest.mark.parametrize(
+    "relative_path", ["notes/plan.markdown", "logs/config.yaml", "logs/extra.yml", "logs/train.log"]
+)
+def test_read_cached_file_reads_other_text_formats(call_tool, cache_dir, relative_path):
+    write_experiment(cache_dir, "exp", {relative_path: "key: value\n"})
+
+    result = call_tool("read_cached_file", experiment_name="exp", relative_path=relative_path)
+
+    assert result["content"] == "key: value\n"
+    assert result["truncated"] is False
+
+
+@pytest.mark.parametrize(
     ("max_bytes", "content", "truncated"),
     [(5, "abcde", True), (10, "abcdefghij", False), (50, "abcdefghij", False)],
 )

@@ -12,12 +12,10 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError, LoginRefreshRequired
 
 from experiment_explorer.config import get_aws_region
-from experiment_explorer.paths import resolve_within
+from experiment_explorer.paths import MANIFEST_NAME, resolve_within
 
 LOGGER = logging.getLogger(__name__)
 AWS_LOGIN_MESSAGE = "AWS session expired. Reauthenticate with `aws login` and retry."
-# Records the S3 ETag and size of each downloaded file, so changes are detected.
-MANIFEST_NAME = ".s3_manifest.json"
 
 
 class S3ExperimentError(RuntimeError):

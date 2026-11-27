@@ -13,8 +13,7 @@ import pandas as pd
 import yaml
 
 from experiment_explorer.config import DOC_FILE_SUFFIXES, METRICS_FILE_PATTERNS
-from experiment_explorer.paths import experiment_cache_path, resolve_within
-from experiment_explorer.s3 import MANIFEST_NAME
+from experiment_explorer.paths import MANIFEST_NAME, experiment_cache_path, resolve_within
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ RESULTS_DIR_NAME = "results"
 PREDICTIONS_DIR_NAME = "predictions"
 CONFIG_FILE_NAME = "config.yaml"
 # Files read_text_file opens. Everything else (images, pickles, models, CSVs) is only listed.
-TEXT_FILE_SUFFIXES = (".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".log")
+TEXT_FILE_SUFFIXES = (*DOC_FILE_SUFFIXES, ".txt", ".json", ".yaml", ".yml", ".log")
 
 
 def resolve_experiment_path(cache_dir: Path, experiment_name: str) -> Path:
@@ -109,7 +108,7 @@ def list_files(experiment_dir: Path, *, max_files: int = 1000) -> dict[str, Any]
 def read_text_file(
     experiment_dir: Path, relative_path: str, *, max_bytes: int = 50_000
 ) -> dict[str, Any]:
-    """Read a Markdown, plain-text or JSON file from a cached experiment, up to max_bytes."""
+    """Read a text file (see TEXT_FILE_SUFFIXES) from a cached experiment, up to max_bytes."""
     if max_bytes < 1:
         raise ValueError(f"max_bytes must be at least 1, got {max_bytes}")
     path = resolve_within(experiment_dir, relative_path)
