@@ -65,6 +65,8 @@ def test_file_listing_rejects_limits_below_one(call_tool, s3, max_files):
     [
         ("read_experiment_metrics", "do not calculate"),
         ("list_experiment_files", "do not count or total"),
+        ("list_cached_files", "do not count or total"),
+        ("read_cached_file", "cut short"),
     ],
 )
 def test_partial_tools_tell_the_model_not_to_calculate_from_partial_results(tool, warning):

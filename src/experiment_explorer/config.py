@@ -13,7 +13,8 @@ METRICS_FILE_PATTERNS = (
     "cv_per_bacteria_results.csv",
     "test_per_bacteria_results.csv",
 )
-DOC_FILE_NAMES = ("README.md", "results.md")
+# Written reports and READMEs, found at any depth.
+DOC_FILE_SUFFIXES = (".md", ".markdown")
 
 
 def get_s3_bucket() -> str:

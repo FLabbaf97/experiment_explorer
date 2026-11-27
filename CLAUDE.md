@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Verifying changes
 
 - The conda environment includes the test tools (`.[dev]`). Run `ruff check .` and `pytest`. CI runs both on every push and pull request.
+- CI also runs the tests with the lowest declared dependency versions (Python 3.10, `uv pip install --resolution lowest-direct`). Raise a minimum in `pyproject.toml` when code needs a newer API, and keep an upper bound below the next untested major.
 - Tests run against a fake S3 (moto) and a temporary cache, so they need no AWS access. Test tool behaviour through the `call_tool` fixture, the way an MCP client does. Pure helpers such as the name validator can be tested directly.
 - Add or update tests with every behaviour change.
 
@@ -46,7 +47,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Plot script
 
 - `scripts/plot_roc_pr_curves.py` needs the `plot` extra: `pip install -e ".[plot]"`.
-- It ignores `EXPERIMENT_EXPLORER_CACHE_DIR`. Pass `--cache-dir` if the cache is not at `<repo>/.cache`.
+- It reads the same cache as the server (`EXPERIMENT_EXPLORER_CACHE_DIR`, else `<repo>/.cache`); `--cache-dir` overrides it.
+- Precision-recall curves are labelled with average precision (`AP=`), not a trapezoid PR-AUC.
 - It plots `predictions/{test,cv}_predictions.csv` from any run folder and `predictions_normalized/<name>_{test,cv}.csv`. Experiments without per-sample predictions, such as `2026-09-16_*`, cannot be plotted.
 
 @AGENTS.md

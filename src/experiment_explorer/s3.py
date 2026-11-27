@@ -6,18 +6,16 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterator
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, LoginRefreshRequired
 
 from experiment_explorer.config import get_aws_region
-from experiment_explorer.paths import resolve_within
+from experiment_explorer.paths import MANIFEST_NAME, resolve_within
 
 LOGGER = logging.getLogger(__name__)
 AWS_LOGIN_MESSAGE = "AWS session expired. Reauthenticate with `aws login` and retry."
-# Records the S3 ETag and size of each downloaded file, so changes are detected.
-MANIFEST_NAME = ".s3_manifest.json"
 
 
 class S3ExperimentError(RuntimeError):
@@ -91,22 +89,26 @@ def _handle_s3_exception(exc: Exception, *, bucket: str, prefix: str, action: st
     raise exc
 
 
+def _list_pages(
+    client: Any, bucket: str, normalized_prefix: str, *, delimiter: str | None = None
+) -> Iterator[dict[str, Any]]:
+    """Yield every list_objects_v2 page under a normalized prefix."""
+    options = {"Bucket": bucket, "Prefix": normalized_prefix}
+    if delimiter:
+        options["Delimiter"] = delimiter
+    yield from client.get_paginator("list_objects_v2").paginate(**options)
+
+
 def list_folder_prefixes(bucket: str, prefix: str = "") -> list[str]:
     """List immediate child folder prefixes under an S3 prefix."""
     normalized_prefix = _normalize_prefix(prefix)
     client = _create_s3_client()
-    paginator = client.get_paginator("list_objects_v2")
 
     folders: list[str] = []
     try:
-        for page in paginator.paginate(
-            Bucket=bucket,
-            Prefix=normalized_prefix,
-            Delimiter="/",
-        ):
+        for page in _list_pages(client, bucket, normalized_prefix, delimiter="/"):
             for common_prefix in page.get("CommonPrefixes", []):
-                folder_prefix = common_prefix["Prefix"]
-                folder_name = folder_prefix[len(normalized_prefix) :].rstrip("/")
+                folder_name = common_prefix["Prefix"][len(normalized_prefix) :].rstrip("/")
                 if folder_name:
                     folders.append(folder_name)
     except Exception as exc:
@@ -117,8 +119,7 @@ def list_folder_prefixes(bucket: str, prefix: str = "") -> list[str]:
 
 def _iter_objects(client: Any, bucket: str, normalized_prefix: str) -> Iterator[S3ObjectInfo]:
     """Yield every file (not folder marker) under a normalized prefix."""
-    paginator = client.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
+    for page in _list_pages(client, bucket, normalized_prefix):
         for item in page.get("Contents", []):
             if item["Key"].endswith("/"):
                 continue
@@ -301,15 +302,3 @@ def download_prefix(
         "missing_in_s3_count": len(missing_in_s3),
         "total_bytes": total_bytes,
     }
-
-
-def iter_relative_keys(keys: Iterable[str], root_prefix: str) -> list[str]:
-    """Convert absolute S3 keys to paths relative to an experiment prefix."""
-    normalized_prefix = _normalize_prefix(root_prefix)
-    relative_paths: list[str] = []
-    for key in keys:
-        if key.startswith(normalized_prefix):
-            relative_paths.append(key[len(normalized_prefix) :])
-        else:
-            relative_paths.append(key)
-    return relative_paths
