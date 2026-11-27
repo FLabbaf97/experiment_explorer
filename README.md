@@ -91,8 +91,8 @@ Restart Claude Code after adding the server. You can also paste the same JSON as
 | `list_experiment_files` | List files under one experiment prefix |
 | `fetch_experiment` | Download an experiment folder to local cache |
 | `list_cached_experiments` | List experiments already downloaded locally |
-| `summarize_experiment` | Find reports and READMEs at any depth, run dirs, metrics, predictions, configs |
-| `list_cached_files` | List every file in a cached experiment with its size |
+| `summarize_experiment` | Summarize any layout: reports, runs, metrics, predictions, configs, and file counts by role |
+| `list_cached_files` | List every file in a cached experiment with its size and role, optionally one role only |
 | `read_cached_file` | Read a Markdown, text, JSON, YAML or log file (size-limited; binaries are never opened) |
 | `read_experiment_metrics` | Preview a metrics CSV (first rows only; not for calculations) |
 | `read_experiment_config` | Load a YAML config file |
@@ -118,11 +118,14 @@ The four calculation tools read every row of a file and say how many rows they u
 |----------|---------|---------|
 | `EXPERIMENT_EXPLORER_S3_BUCKET` | `phage-match-ml-experiments` | S3 bucket name |
 | `EXPERIMENT_EXPLORER_CACHE_DIR` | `experiment_explorer/.cache` | Local download directory |
+| `EXPERIMENT_EXPLORER_LAYOUT_RULES` | none | Extra file-role rules for another project's layouts (see below) |
 | `AWS_REGION` / `AWS_DEFAULT_REGION` | boto3 default | Optional region override |
 
-## Experiment layout
+## Experiment layouts
 
-Experiments follow the structure used in `phage_match_RnD/experiments/`:
+Experiments are written by different pipelines, and one experiment often mixes several layouts: training runs, production and leave-one-bacterium-out runs, comparison folders, diversity analyses, GenoPHI pipelines and learning curves. `summarize_experiment` gives every file a role (report, metrics, predictions, config, figure, code, model, log, data or other) from the ordered rules in `src/experiment_explorer/layout_rules.yaml`, so it works for all of them. To support another layout, add rules there, or point `EXPERIMENT_EXPLORER_LAYOUT_RULES` at your own rules file in the same format; its rules are checked first. See `docs/adr/0003-file-roles-from-ordered-rules.md`.
+
+The original run layout, from `phage_match_RnD/experiments/`:
 
 ```
 experiment_name/

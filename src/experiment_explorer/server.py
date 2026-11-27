@@ -213,25 +213,29 @@ def list_cached_experiments() -> str:
 
 @mcp.tool
 @_returns_errors
-def list_cached_files(experiment_name: str, max_files: int = 1000) -> str:
-    """List every file in a cached experiment, at any depth, with its size.
+def list_cached_files(
+    experiment_name: str, max_files: int = 1000, role: str | None = None
+) -> str:
+    """List every file in a cached experiment, at any depth, with its size and role.
 
-    Use it to find written reports, READMEs, notes and JSON summaries anywhere in the
-    experiment. Returns at most `max_files` files; when `truncated` is true the listing
-    is partial (`total_count` is the full number), so do not count or total from it.
+    Each file's role is what it is for: report, metrics, predictions, config, figure,
+    code, model, log, data or other. Pass `role` to list only one kind, for example
+    role="report" for written reports or role="predictions". Returns at most `max_files`
+    files; when `truncated` is true the listing is partial (`total_count` is the full
+    number), so do not count or total from it.
 
     Args:
       experiment_name: Name of a locally cached experiment folder.
       max_files: Maximum number of files to return (at least 1).
+      role: Optional role to filter by.
 
     Returns:
-      JSON with each file's relative path and size, `count`, `total_count`, and
+      JSON with each file's relative path, size and role, `count`, `total_count`, and
       `truncated`.
     """
     experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
-    return _json_response(
-        {"experiment_name": experiment_name, **list_files(experiment_dir, max_files=max_files)}
-    )
+    listing = list_files(experiment_dir, max_files=max_files, role=role)
+    return _json_response({"experiment_name": experiment_name, "role": role, **listing})
 
 
 @mcp.tool
@@ -261,13 +265,25 @@ def read_cached_file(experiment_name: str, relative_path: str, max_bytes: int = 
 @mcp.tool
 @_returns_errors
 def summarize_experiment(experiment_name: str) -> str:
-    """Summarize a cached experiment: docs, runs, metrics, and config files.
+    """Summarize a cached experiment of any layout: its runs, reports, metrics, predictions
+    and configs, and how many files of each role it holds.
+
+    Every file is given a role (report, metrics, predictions, config, figure, code,
+    model, log, data or other) by the layout rules. `docs` lists the written reports,
+    top-level first: a README states the question and setup, REPORT, results and SUMMARY
+    documents state the findings. Identical copies of a report are listed once (see
+    `report_copies`) and empty ones are set apart in `empty_reports`. `metrics_files`
+    are metric tables (CSV) for read_experiment_metrics and the calculation tools;
+    `other_metrics_files` are JSON or text results for read_cached_file. `runs` lists
+    every run folder with its kind (results or production) and whether it is starred.
+    Use list_cached_files with a role to see the files `files_by_role` only counts.
 
     Args:
       experiment_name: Name of a locally cached experiment folder.
 
     Returns:
-      JSON summary of experiment artifacts for analysis and plotting.
+      JSON with `docs`, `runs`, `run_directories`, `metrics_files`,
+      `other_metrics_files`, `prediction_files`, `config_files` and `files_by_role`.
     """
     experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
     return _json_response(scan_experiment(experiment_dir))
@@ -484,8 +500,13 @@ def prediction_metrics(
 
 @mcp.resource("experiment://layout")
 def experiment_layout() -> str:
-    """Describe the typical phage-match experiment folder layout."""
+    """Describe the phage-match experiment folder layouts."""
     layout = {
+        "note": (
+            "Experiments mix several layouts. summarize_experiment gives every file a role "
+            "from the layout rules (layout_rules.yaml, plus EXPERIMENT_EXPLORER_LAYOUT_RULES "
+            "if set), so it works for all of them."
+        ),
         "top_level": ["README.md", "run_exp.sh", "split_*/", "model_*/"],
         "run_directory": {
             "pattern": "results_YYYYMMDD_HHMMSS/",
@@ -501,6 +522,18 @@ def experiment_layout() -> str:
                 "artifacts/": ["feature_order.txt"],
             },
         },
+        "other_layouts": {
+            "production run": (
+                "production_YYYYMMDD_HHMMSS/ with results/test_metrics.csv, "
+                "results/training_metrics.csv and predictions/test_predictions.csv; no CV"
+            ),
+            "comparison": (
+                "README.md, SUMMARY.md, manifest.json, comparison_config.json, metrics/, "
+                "plots/, predictions_normalized/<series>_{test,cv}.csv"
+            ),
+            "analysis": "README.md, REPORT.md, experiment_config.yaml, data/, outputs/, figures/",
+            "GenoPHI pipeline": "training/, external_evaluation/ (metrics and predictions)",
+        },
         "workflow": [
             "1. list_experiments",
             "2. fetch_experiment",
@@ -508,7 +541,8 @@ def experiment_layout() -> str:
             "4. compare_runs / summarize_run for results; bacteria_metrics and "
             "prediction_metrics for breakdowns",
             "5. read_experiment_metrics (preview only) / read_experiment_config",
-            "6. list_cached_files / read_cached_file for reports, notes and JSON",
+            "6. list_cached_files (filter by role) / read_cached_file for reports, notes "
+            "and JSON",
         ],
     }
     return json.dumps(layout, indent=2)

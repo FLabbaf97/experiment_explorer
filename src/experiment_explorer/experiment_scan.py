@@ -1,25 +1,25 @@
-"""Scan local experiment folders for metrics, docs, and run artifacts."""
+"""Summarize, list and read the files of a cached experiment."""
 
 from __future__ import annotations
 
 import codecs
+import hashlib
 import json
 import logging
-import os
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import yaml
 
-from experiment_explorer.config import DOC_FILE_SUFFIXES, METRICS_FILE_PATTERNS
-from experiment_explorer.paths import MANIFEST_NAME, experiment_cache_path, resolve_within
+from experiment_explorer.config import DOC_FILE_SUFFIXES
+from experiment_explorer.layout import ROLES, find_run_folders, load_rules, walk_files
+from experiment_explorer.paths import experiment_cache_path, resolve_within
 
 LOGGER = logging.getLogger(__name__)
 
 RESULTS_DIR_NAME = "results"
-PREDICTIONS_DIR_NAME = "predictions"
-CONFIG_FILE_NAME = "config.yaml"
 # Files read_text_file opens. Everything else (images, pickles, models, CSVs) is only listed.
 TEXT_FILE_SUFFIXES = (*DOC_FILE_SUFFIXES, ".txt", ".json", ".yaml", ".yml", ".log")
 
@@ -36,26 +36,85 @@ def resolve_experiment_path(cache_dir: Path, experiment_name: str) -> Path:
 
 
 def scan_experiment(experiment_dir: Path) -> dict[str, Any]:
-    """Build a structured summary of a local experiment directory."""
+    """Summarize a cached experiment: its runs, and its files by role (docs/adr/0003)."""
     if not experiment_dir.exists():
         raise FileNotFoundError(f"Experiment directory does not exist: {experiment_dir}")
 
-    docs = _find_docs(experiment_dir)
-    run_dirs = _find_run_directories(experiment_dir)
-    metrics_files = _find_metrics_files(experiment_dir)
-    prediction_files = _find_prediction_files(experiment_dir)
-    config_files = _find_config_files(experiment_dir)
+    rules = load_rules()
+    by_role: dict[str, list[tuple[str, Path]]] = {role: [] for role in ROLES}
+    for relative_path, path in walk_files(experiment_dir):
+        by_role[rules.role_of(relative_path)].append((relative_path, path))
+
+    docs, report_copies, empty_reports = _distinct_reports(by_role["report"])
+    runs = find_run_folders(experiment_dir, rules=rules)
+    run_entries = [
+        {
+            "path": run.path,
+            "kind": run.kind,
+            "starred": run.starred,
+            "has_results_folder": (experiment_dir / run.path / RESULTS_DIR_NAME).is_dir(),
+        }
+        for run in runs
+    ]
+    run_dirs = [entry["path"] for entry in run_entries if entry["has_results_folder"]]
+    metrics = [relative_path for relative_path, _ in by_role["metrics"]]
+    metric_tables = [path for path in metrics if path.lower().endswith(".csv")]
 
     return {
         "experiment_path": str(experiment_dir),
         "docs": docs,
         "run_directories": run_dirs,
-        "metrics_files": metrics_files,
-        "prediction_files": prediction_files,
-        "config_files": config_files,
-        "metrics_file_count": len(metrics_files),
+        "metrics_files": metric_tables,
+        "prediction_files": [relative_path for relative_path, _ in by_role["predictions"]],
+        "config_files": [relative_path for relative_path, _ in by_role["config"]],
+        "metrics_file_count": len(metric_tables),
         "run_count": len(run_dirs),
+        "other_metrics_files": [path for path in metrics if not path.lower().endswith(".csv")],
+        "runs": run_entries,
+        "report_copies": report_copies,
+        "empty_reports": empty_reports,
+        "files_by_role": {
+            role: {"count": len(files), "by_top_folder": _count_by_top_folder(files)}
+            for role, files in by_role.items()
+            if files
+        },
+        "layout_rules": list(rules.sources),
     }
+
+
+def _distinct_reports(
+    reports: list[tuple[str, Path]],
+) -> tuple[list[str], dict[str, list[str]], list[str]]:
+    """Reports top-level first, each identical copy listed once, and empty ones apart.
+
+    Returns (reports, {listed report: [its identical copies]}, empty reports).
+    """
+    ordered = sorted(reports, key=lambda item: (item[0].count("/"), item[0]))
+    listed: list[str] = []
+    copies: dict[str, list[str]] = {}
+    first_with_content: dict[str, str] = {}
+    empty: list[str] = []
+    for relative_path, path in ordered:
+        content = path.read_bytes()
+        if not content.strip():
+            empty.append(relative_path)
+            continue
+        digest = hashlib.sha256(content).hexdigest()
+        if digest in first_with_content:
+            copies.setdefault(first_with_content[digest], []).append(relative_path)
+            continue
+        first_with_content[digest] = relative_path
+        listed.append(relative_path)
+    return listed, copies, empty
+
+
+def _count_by_top_folder(files: list[tuple[str, Path]]) -> dict[str, int]:
+    """How many of the files are in each top-level folder ("." for the experiment root)."""
+    counts = Counter(
+        relative_path.split("/", 1)[0] if "/" in relative_path else "."
+        for relative_path, _ in files
+    )
+    return dict(sorted(counts.items()))
 
 
 def read_metrics_csv(
@@ -88,16 +147,26 @@ def read_metrics_csv(
     }
 
 
-def list_files(experiment_dir: Path, *, max_files: int = 1000) -> dict[str, Any]:
-    """List every file in a cached experiment, at any depth, with its size."""
+def list_files(
+    experiment_dir: Path, *, max_files: int = 1000, role: str | None = None
+) -> dict[str, Any]:
+    """List every file in a cached experiment, at any depth, with its size and role."""
     if max_files < 1:
         raise ValueError(f"max_files must be at least 1, got {max_files}")
-    files = _walk_files(experiment_dir)
+    if role is not None and role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}, got {role!r}")
+    rules = load_rules()
+    files = [
+        (relative_path, path, rules.role_of(relative_path))
+        for relative_path, path in walk_files(experiment_dir)
+    ]
+    if role is not None:
+        files = [item for item in files if item[2] == role]
     listed = files[:max_files]
     return {
         "files": [
-            {"relative_path": relative_path, "size_bytes": path.stat().st_size}
-            for relative_path, path in listed
+            {"relative_path": relative_path, "size_bytes": path.stat().st_size, "role": file_role}
+            for relative_path, path, file_role in listed
         ],
         "count": len(listed),
         "total_count": len(files),
@@ -145,26 +214,6 @@ def _not_text_message(relative_path: str) -> str:
     )
 
 
-def _walk_files(experiment_dir: Path) -> list[tuple[str, Path]]:
-    """Return (relative path, path) for every file inside the experiment, sorted.
-
-    Symlinked folders are not followed, and symlinked files that point outside the
-    experiment are left out. The cache manifest is bookkeeping, not experiment data.
-    """
-    root = experiment_dir.resolve()
-    found: list[tuple[str, Path]] = []
-    for folder, _, names in os.walk(root):
-        for name in names:
-            path = Path(folder) / name
-            relative_path = path.relative_to(root).as_posix()
-            if relative_path == MANIFEST_NAME:
-                continue
-            if not path.is_file() or not path.resolve().is_relative_to(root):
-                continue
-            found.append((relative_path, path))
-    return sorted(found)
-
-
 def read_config_yaml(experiment_dir: Path, relative_path: str) -> dict[str, Any]:
     """Load a YAML config file from a cached experiment."""
     config_path = resolve_within(experiment_dir, relative_path)
@@ -179,46 +228,3 @@ def read_config_yaml(experiment_dir: Path, relative_path: str) -> dict[str, Any]
         "path": relative_path,
         "content": content,
     }
-
-
-def _find_docs(experiment_dir: Path) -> list[str]:
-    """Markdown reports and READMEs at any depth, top-level ones first."""
-    docs = [
-        relative_path
-        for relative_path, path in _walk_files(experiment_dir)
-        if path.suffix.lower() in DOC_FILE_SUFFIXES
-    ]
-    return sorted(docs, key=lambda relative_path: (relative_path.count("/"), relative_path))
-
-
-def _find_run_directories(experiment_dir: Path) -> list[str]:
-    run_dirs: list[str] = []
-    for path in sorted(experiment_dir.rglob("results_*")):
-        if path.is_dir() and (path / RESULTS_DIR_NAME).exists():
-            run_dirs.append(str(path.relative_to(experiment_dir)))
-    return run_dirs
-
-
-def _find_metrics_files(experiment_dir: Path) -> list[str]:
-    metrics: list[str] = []
-    for pattern in METRICS_FILE_PATTERNS:
-        for path in experiment_dir.rglob(pattern):
-            if path.is_file():
-                metrics.append(str(path.relative_to(experiment_dir)))
-    return sorted(set(metrics))
-
-
-def _find_prediction_files(experiment_dir: Path) -> list[str]:
-    predictions: list[str] = []
-    for path in experiment_dir.rglob(f"{PREDICTIONS_DIR_NAME}/*.csv"):
-        if path.is_file():
-            predictions.append(str(path.relative_to(experiment_dir)))
-    return sorted(predictions)
-
-
-def _find_config_files(experiment_dir: Path) -> list[str]:
-    configs: list[str] = []
-    for path in experiment_dir.rglob(CONFIG_FILE_NAME):
-        if path.is_file():
-            configs.append(str(path.relative_to(experiment_dir)))
-    return sorted(configs)

@@ -17,7 +17,7 @@ Every figure comes from every row of a file. The four calculation tools and the 
 | Metrics from predictions, overall or per bacteria, phage or fold; do members agree? | `prediction_metrics` |
 | Anything else | your own code, through the loader (below) |
 
-Start an experiment question with `compare_runs` to find its runs, then go deeper with the others. To address a run, pass its folder path (from `compare_runs`) and a partition (`test` or `cv`). For files outside the standard run layout (for example production runs), pass `relative_path`.
+Start an experiment question with `compare_runs` to find its runs, then go deeper with the others. To address a run, pass its folder path (from `compare_runs`) and a partition (`test` or `cv`). For files outside the standard run layout (for example production runs, which `compare_runs` lists under `runs_not_compared`, or comparison folders), find them with `summarize_experiment` and pass them as `relative_path`.
 
 ## Choosing the run
 

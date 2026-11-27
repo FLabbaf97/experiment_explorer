@@ -372,17 +372,25 @@ def compare_runs(
     """Every run, grouped by folder and evaluation setup, in time order. Never ranked."""
     if folder and runs:
         raise ValueError("Pass either folder or runs, not both.")
+    not_compared: list[str] = []
     if runs:
         for run in runs:
             tables.resolve_run(experiment_dir, run)
         run_list = sorted(set(runs))
     else:
-        run_list = tables.find_runs(experiment_dir, folder)
+        found = tables.find_run_folders(experiment_dir, folder)
+        run_list = [run.path for run in found if run.kind == tables.RESULTS_KIND]
+        not_compared = [run.path for run in found if run.kind != tables.RESULTS_KIND]
     if not run_list:
         where = f" under {folder}" if folder else ""
+        production = (
+            f" It has {len(not_compared)} production run(s), which this tool does not compare yet."
+            if not_compared
+            else ""
+        )
         raise FileNotFoundError(
-            f"No runs (results_* folders) found{where}. This experiment may use another "
-            "layout: use summarize_experiment to find its files, and pass them to "
+            f"No results runs (results_<timestamp> folders) found{where}.{production} Use "
+            "summarize_experiment to find this experiment's files, and pass them to "
             "bacteria_metrics or prediction_metrics as relative_path."
         )
 
@@ -395,7 +403,7 @@ def compare_runs(
         ordered = sorted(by_folder[name], key=lambda r: (tables.run_timestamp(r), r))
         folders.append(_compare_folder(name, [_run_record(experiment_dir, r) for r in ordered]))
 
-    return {
+    result: dict[str, Any] = {
         "run_count": len(run_list),
         "folder_count": len(folders),
         "folders": folders,
@@ -405,6 +413,15 @@ def compare_runs(
             "and let the user choose."
         ),
     }
+    if not_compared:
+        result["runs_not_compared"] = {
+            "runs": not_compared,
+            "reason": (
+                "production runs (trained once, without CV folds) are not compared yet; "
+                "summarize_experiment lists their files"
+            ),
+        }
+    return result
 
 
 # --- bacteria_metrics ------------------------------------------------------------

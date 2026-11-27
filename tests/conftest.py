@@ -26,6 +26,7 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any
         "AWS_SESSION_TOKEN",
         "AWS_ENDPOINT_URL",
         "AWS_ENDPOINT_URL_S3",
+        "EXPERIMENT_EXPLORER_LAYOUT_RULES",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
