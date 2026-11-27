@@ -11,6 +11,7 @@ from typing import Any, Callable
 import yaml
 from fastmcp import FastMCP
 
+from experiment_explorer import calculations
 from experiment_explorer.config import get_cache_dir, get_s3_bucket
 from experiment_explorer.experiment_scan import (
     read_config_yaml,
@@ -33,7 +34,14 @@ mcp = FastMCP(
     instructions=(
         "Tools for listing and fetching phage-match ML experiments from S3 "
         "(bucket: phage-match-ml-experiments), then inspecting metrics and configs "
-        "from the local cache for plotting and analysis."
+        "from the local cache for plotting and analysis. "
+        "Any calculation over results (averages, spreads, counts, rankings, per-bacteria or "
+        "per-phage figures, metrics from predictions) must use summarize_run, compare_runs, "
+        "bacteria_metrics or prediction_metrics, which read every row, or the "
+        "experiment_explorer.tables loader in your own code. Never calculate from "
+        "read_experiment_metrics preview rows. Always say whether a figure is from the test "
+        "set or CV, which run it came from, and how many rows it used. Never name a best run: "
+        "a starred run is the default answer; otherwise list the runs and let the user choose."
     ),
 )
 
@@ -218,9 +226,11 @@ def read_experiment_metrics(
     relative_path: str,
     max_rows: int = 50,
 ) -> str:
-    """Preview a metrics CSV from a cached experiment.
+    """Preview a metrics CSV from a cached experiment, to see its columns and a few rows.
 
-    This returns only the first `max_rows` rows. `row_count` is the total number of
+    For any calculation use summarize_run, compare_runs, bacteria_metrics or
+    prediction_metrics instead: they read every row. This returns only the first
+    `max_rows` rows. `row_count` is the total number of
     rows in the file and `truncated` is true when the preview is partial. Do not
     calculate averages, totals, or other statistics from a truncated preview: it is
     not the whole file.
@@ -254,6 +264,170 @@ def read_experiment_config(experiment_name: str, relative_path: str) -> str:
     return _json_response(read_config_yaml(experiment_dir, relative_path))
 
 
+@mcp.tool
+@_returns_errors
+def summarize_run(experiment_name: str, run: str) -> str:
+    """Answer "how good is this run?" and "how stable is it?" from every row.
+
+    Gives the run's headline metrics (the ensemble's test value, or the mean across CV
+    folds for a run without test results) and their spread: mean, std, min and max
+    across ensemble members (test) and across folds (CV). Each statistic has `n`, the
+    number of values it used. The ensemble row is never averaged with member rows.
+
+    Args:
+      experiment_name: Name of a locally cached experiment folder.
+      run: The run folder relative to the experiment root, for example
+        split_known_phage/model_xgboost/results_20260108_163011_star.
+
+    Returns:
+      JSON with `headline` (partition "test" or "cv", its source and values), `test`
+      and `cv` sections with row counts and spreads, and whether the run is starred.
+    """
+    experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
+    return _json_response(calculations.summarize_run(experiment_dir, run))
+
+
+@mcp.tool
+@_returns_errors
+def compare_runs(
+    experiment_name: str, folder: str | None = None, runs: list[str] | None = None
+) -> str:
+    """Answer "how do these runs compare?" and "which run is the experiment's result?".
+
+    Lists every run in the experiment (or in one folder, or the given runs), grouped
+    by folder and then by evaluation setup (the data a run is trained and tested on),
+    in time order. Each entry shows the model settings that differ and the headline
+    ROC AUC and average precision. Runs with identical configs are merged. A starred
+    run is the default answer. Incomplete runs are listed with a reason.
+
+    Runs are never ranked and no best run is named: only runs in the same setup group
+    are fairly comparable. Present the differences and let the user choose.
+
+    Args:
+      experiment_name: Name of a locally cached experiment folder.
+      folder: Optional folder inside the experiment to limit the comparison to.
+      runs: Optional list of run folders to compare instead.
+
+    Returns:
+      JSON with `folders`, each holding `setup_groups`, `incomplete_runs`, the starred
+      runs and the evaluation setup its runs share.
+    """
+    experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
+    return _json_response(calculations.compare_runs(experiment_dir, folder=folder, runs=runs))
+
+
+@mcp.tool
+@_returns_errors
+def bacteria_metrics(
+    experiment_name: str,
+    run: str | None = None,
+    partition: str | None = None,
+    relative_path: str | None = None,
+    bacteria: list[str] | None = None,
+    metric: str | None = None,
+    threshold: float | None = None,
+    direction: str = "above",
+    best_n: int | None = None,
+    worst_n: int | None = None,
+    members: str = "ensemble",
+    max_groups: int = 50,
+) -> str:
+    """Answer per-bacteria questions from every row: "what is the ROC AUC for KLEB12?",
+    "how does the model do on a typical strain?", "how many bacteria have ROC AUC above
+    0.7?", "which bacteria does it get most wrong?".
+
+    Reads the run's per-bacteria results. Test results use the ensemble's rows by
+    default. In CV a bacterium can appear in several folds: its value is the mean of
+    its stored per-fold values, and a lookup also lists each fold. Missing values are
+    left out and each statistic reports `n`. Bacterium lookup matches IDs exactly,
+    ignoring case; an unknown ID returns an error listing close IDs, never a guess.
+
+    Args:
+      experiment_name: Name of a locally cached experiment folder.
+      run: Run folder relative to the experiment root (use with partition).
+      partition: "test" or "cv".
+      relative_path: Instead of run and partition, any per-bacteria CSV in the experiment.
+      bacteria: IDs to look up.
+      metric: One metric column, for example roc_auc, avg_precision or hit_5. Required
+        for threshold, best_n and worst_n.
+      threshold: Count bacteria whose metric is strictly above (or below) this value.
+      direction: "above" or "below" for threshold.
+      best_n: List the N bacteria with the highest metric.
+      worst_n: List the N bacteria with the lowest metric.
+      members: "ensemble" (default) or "each" (the members' rows; lookups show each one).
+      max_groups: Maximum bacteria listed (at least 1); `truncated` says when cut short.
+
+    Returns:
+      JSON with row counts, `across_bacteria` stats, and `bacteria`, `threshold`,
+      `best` or `worst` sections when asked for.
+    """
+    experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
+    return _json_response(
+        calculations.bacteria_metrics(
+            experiment_dir,
+            run=run,
+            partition=partition,
+            relative_path=relative_path,
+            bacteria=bacteria,
+            metric=metric,
+            threshold=threshold,
+            direction=direction,
+            best_n=best_n,
+            worst_n=worst_n,
+            members=members,
+            max_groups=max_groups,
+        )
+    )
+
+
+@mcp.tool
+@_returns_errors
+def prediction_metrics(
+    experiment_name: str,
+    run: str | None = None,
+    partition: str | None = None,
+    relative_path: str | None = None,
+    group_by: str = "none",
+    members: str = "ensemble",
+    max_groups: int = 50,
+) -> str:
+    """Answer questions that need metrics computed from predictions: "what is the ROC AUC
+    per phage?", "what is the pooled AUC for each bacterium?", "what is the confusion
+    matrix?", "do the ensemble members agree?".
+
+    Computes ROC AUC, average precision, precision, recall, F1, MCC and the confusion
+    matrix from every row of a predictions file. Threshold metrics use the stored
+    y_pred. A group with only one class gets null ROC AUC and average precision, a
+    reason, and counts toward `skipped`; it is left out of `across_groups`.
+
+    Args:
+      experiment_name: Name of a locally cached experiment folder.
+      run: Run folder relative to the experiment root (use with partition).
+      partition: "test" or "cv".
+      relative_path: Instead of run and partition, any predictions CSV in the experiment.
+      group_by: "none", "bacteria", "phage" or "fold".
+      members: "ensemble" (default) or "each" (one result per member plus their spread;
+        only with group_by "none").
+      max_groups: Maximum groups listed (at least 1); `truncated` says when cut short.
+
+    Returns:
+      JSON with row counts and `metrics`, or `groups` with `across_groups` stats, or
+      `by_member` with `member_spread`.
+    """
+    experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
+    return _json_response(
+        calculations.prediction_metrics(
+            experiment_dir,
+            run=run,
+            partition=partition,
+            relative_path=relative_path,
+            group_by=group_by,
+            members=members,
+            max_groups=max_groups,
+        )
+    )
+
+
 @mcp.resource("experiment://layout")
 def experiment_layout() -> str:
     """Describe the typical phage-match experiment folder layout."""
@@ -277,7 +451,9 @@ def experiment_layout() -> str:
             "1. list_experiments",
             "2. fetch_experiment",
             "3. summarize_experiment",
-            "4. read_experiment_metrics / read_experiment_config",
+            "4. compare_runs / summarize_run for results; bacteria_metrics and "
+            "prediction_metrics for breakdowns",
+            "5. read_experiment_metrics (preview only) / read_experiment_config",
         ],
     }
     return json.dumps(layout, indent=2)

@@ -35,6 +35,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Only files listed in the manifest are ever deleted: `force_refresh` removes them when they disappear from S3 and still match the downloaded size, and a normal fetch reports them in `missing_in_s3`. Files not in the manifest are never touched.
 - Fetching an experiment with no files in S3 returns a not-found error and creates nothing in the cache.
 
+## Results calculations
+
+- The calculation tools (`summarize_run`, `compare_runs`, `bacteria_metrics`, `prediction_metrics`) live in `calculations.py`. They read files through the public loader in `tables.py`, which Claude also imports in its own scripts. Put file-reading rules in the loader so the tools and scripts stay consistent.
+- The evaluation-setup keys and the bookkeeping keys each have one list in `tables.py`.
+- `compare_runs` lists runs and never ranks them or names a best one (docs/adr/0001). A starred run is the default answer.
+- Every calculation result reports its row counts and the `n` behind each statistic. NaN and inf become `null`.
+- `skills/experiment-results/SKILL.md` tells Claude how to use these tools. Update it when tool behaviour changes.
+
 ## Plot script
 
 - `scripts/plot_roc_pr_curves.py` needs the `plot` extra: `pip install -e ".[plot]"`.
