@@ -38,7 +38,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Plot script
 
 - `scripts/plot_roc_pr_curves.py` needs the `plot` extra: `pip install -e ".[plot]"`.
-- It ignores `EXPERIMENT_EXPLORER_CACHE_DIR`. Pass `--cache-dir` if the cache is not at `<repo>/.cache`.
+- It reads the same cache as the server (`EXPERIMENT_EXPLORER_CACHE_DIR`, else `<repo>/.cache`); `--cache-dir` overrides it.
+- Precision-recall curves are labelled with average precision (`AP=`), not a trapezoid PR-AUC.
 - It plots `predictions/{test,cv}_predictions.csv` from any run folder and `predictions_normalized/<name>_{test,cv}.csv`. Experiments without per-sample predictions, such as `2026-09-16_*`, cannot be plotted.
 
 @AGENTS.md

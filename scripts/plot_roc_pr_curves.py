@@ -13,11 +13,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.metrics import auc, precision_recall_curve, roc_curve
+from sklearn.metrics import auc, average_precision_score, precision_recall_curve, roc_curve
+
+from experiment_explorer.config import get_cache_dir
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[1] / ".cache"
 RUN_DIR_PATTERN = re.compile(r"_(\d{8}_\d{6})(?:_star)?$")
 NORMALIZED_FILE_PATTERN = re.compile(r"(?P<series>.+)_(?P<kind>test|cv)\.csv")
 PREDICTION_KINDS = ("test", "cv")
@@ -47,8 +48,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=DEFAULT_CACHE_DIR,
-        help="Local experiment cache directory.",
+        default=None,
+        help=(
+            "Local experiment cache directory (defaults to EXPERIMENT_EXPLORER_CACHE_DIR, "
+            "or the server's default cache)."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -141,7 +145,7 @@ def compute_curve_metrics(y_true: pd.Series, y_pred_proba: pd.Series) -> dict[st
         "precision": precision.tolist(),
         "recall": recall.tolist(),
         "roc_auc": float(auc(fpr, tpr)),
-        "pr_auc": float(auc(recall, precision)),
+        "average_precision": float(average_precision_score(y_true, y_pred_proba)),
         "baseline_precision": float(y_true.mean()),
         "n_samples": int(len(y_true)),
         "n_positive": int(y_true.sum()),
@@ -176,7 +180,7 @@ def plot_split_curves(
             metrics["precision"],
             color=color,
             lw=2,
-            label=f"{label} (AUC={metrics['pr_auc']:.3f})",
+            label=f"{label} (AP={metrics['average_precision']:.3f})",
         )
 
     prediction_label = "test" if prediction_kind == "test" else "cross-validation"
@@ -229,7 +233,8 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args()
 
-    experiment_dir = args.cache_dir / args.experiment_name
+    cache_dir = args.cache_dir or get_cache_dir()
+    experiment_dir = cache_dir / args.experiment_name
     if not experiment_dir.exists():
         LOGGER.error("Experiment not cached at %s. Run fetch_experiment first.", experiment_dir)
         return 1
