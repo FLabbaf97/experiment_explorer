@@ -17,7 +17,6 @@ LOGGER = logging.getLogger(__name__)
 
 RESULTS_DIR_NAME = "results"
 PREDICTIONS_DIR_NAME = "predictions"
-LOGS_DIR_NAME = "logs"
 CONFIG_FILE_NAME = "config.yaml"
 
 
