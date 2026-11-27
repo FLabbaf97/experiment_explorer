@@ -89,7 +89,9 @@ Restart Claude Code after adding the server. You can also paste the same JSON as
 | `list_experiment_files` | List files under one experiment prefix |
 | `fetch_experiment` | Download an experiment folder to local cache |
 | `list_cached_experiments` | List experiments already downloaded locally |
-| `summarize_experiment` | Find README, run dirs, metrics, predictions, configs |
+| `summarize_experiment` | Find reports and READMEs at any depth, run dirs, metrics, predictions, configs |
+| `list_cached_files` | List every file in a cached experiment with its size |
+| `read_cached_file` | Read a Markdown, text, JSON, YAML or log file (size-limited; binaries are never opened) |
 | `read_experiment_metrics` | Load a metrics CSV (preview rows) |
 | `read_experiment_config` | Load a YAML config file |
 
@@ -99,7 +101,8 @@ Restart Claude Code after adding the server. You can also paste the same JSON as
 2. `fetch_experiment` with `experiment_name="2026-04-20_Baseline"`
 3. `summarize_experiment` — discover metrics file paths
 4. `read_experiment_metrics` — inspect `test_results.csv`, etc.
-5. Use the returned data for plotting or further analysis
+5. `list_cached_files` / `read_cached_file` — read written reports, notes and JSON summaries
+6. Use the returned data for plotting or further analysis
 
 ## Environment variables
 

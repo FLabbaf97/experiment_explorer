@@ -13,8 +13,10 @@ from fastmcp import FastMCP
 
 from experiment_explorer.config import get_cache_dir, get_s3_bucket
 from experiment_explorer.experiment_scan import (
+    list_files,
     read_config_yaml,
     read_metrics_csv,
+    read_text_file,
     resolve_experiment_path,
     scan_experiment,
 )
@@ -198,6 +200,53 @@ def list_cached_experiments() -> str:
 
 @mcp.tool
 @_returns_errors
+def list_cached_files(experiment_name: str, max_files: int = 1000) -> str:
+    """List every file in a cached experiment, at any depth, with its size.
+
+    Use it to find written reports, READMEs, notes and JSON summaries anywhere in the
+    experiment. Returns at most `max_files` files; when `truncated` is true the listing
+    is partial (`total_count` is the full number), so do not count or total from it.
+
+    Args:
+      experiment_name: Name of a locally cached experiment folder.
+      max_files: Maximum number of files to return (at least 1).
+
+    Returns:
+      JSON with each file's relative path and size, `count`, `total_count`, and
+      `truncated`.
+    """
+    experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
+    return _json_response(
+        {"experiment_name": experiment_name, **list_files(experiment_dir, max_files=max_files)}
+    )
+
+
+@mcp.tool
+@_returns_errors
+def read_cached_file(experiment_name: str, relative_path: str, max_bytes: int = 50_000) -> str:
+    """Read a Markdown, plain-text, JSON, YAML or log file from a cached experiment.
+
+    Use it for written reports, READMEs, notes and JSON summaries; find them with
+    list_cached_files. Returns at most `max_bytes` bytes. When `truncated` is true the
+    content is cut short (`size_bytes` is the full size): say so, and call again with a
+    larger `max_bytes` if the rest matters. Binary files such as images, pickles and
+    models are refused, never opened. Use read_experiment_metrics for CSVs.
+
+    Args:
+      experiment_name: Name of a locally cached experiment folder.
+      relative_path: Path to the file relative to the experiment root
+        (e.g. analysis/REPORT.md).
+      max_bytes: Maximum number of bytes to return (at least 1).
+
+    Returns:
+      JSON with the file's content, size_bytes, bytes_returned, and truncated.
+    """
+    experiment_dir = resolve_experiment_path(get_cache_dir(), experiment_name)
+    return _json_response(read_text_file(experiment_dir, relative_path, max_bytes=max_bytes))
+
+
+@mcp.tool
+@_returns_errors
 def summarize_experiment(experiment_name: str) -> str:
     """Summarize a cached experiment: docs, runs, metrics, and config files.
 
@@ -278,6 +327,7 @@ def experiment_layout() -> str:
             "2. fetch_experiment",
             "3. summarize_experiment",
             "4. read_experiment_metrics / read_experiment_config",
+            "5. list_cached_files / read_cached_file for reports, notes and JSON",
         ],
     }
     return json.dumps(layout, indent=2)

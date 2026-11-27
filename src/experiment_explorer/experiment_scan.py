@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import codecs
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import yaml
 
-from experiment_explorer.config import DOC_FILE_NAMES, METRICS_FILE_PATTERNS
+from experiment_explorer.config import DOC_FILE_SUFFIXES, METRICS_FILE_PATTERNS
 from experiment_explorer.paths import experiment_cache_path, resolve_within
+from experiment_explorer.s3 import MANIFEST_NAME
 
 LOGGER = logging.getLogger(__name__)
 
 RESULTS_DIR_NAME = "results"
 PREDICTIONS_DIR_NAME = "predictions"
 CONFIG_FILE_NAME = "config.yaml"
+# Files read_text_file opens. Everything else (images, pickles, models, CSVs) is only listed.
+TEXT_FILE_SUFFIXES = (".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".log")
 
 
 def resolve_experiment_path(cache_dir: Path, experiment_name: str) -> Path:
@@ -84,6 +89,83 @@ def read_metrics_csv(
     }
 
 
+def list_files(experiment_dir: Path, *, max_files: int = 1000) -> dict[str, Any]:
+    """List every file in a cached experiment, at any depth, with its size."""
+    if max_files < 1:
+        raise ValueError(f"max_files must be at least 1, got {max_files}")
+    files = _walk_files(experiment_dir)
+    listed = files[:max_files]
+    return {
+        "files": [
+            {"relative_path": relative_path, "size_bytes": path.stat().st_size}
+            for relative_path, path in listed
+        ],
+        "count": len(listed),
+        "total_count": len(files),
+        "truncated": len(listed) < len(files),
+    }
+
+
+def read_text_file(
+    experiment_dir: Path, relative_path: str, *, max_bytes: int = 50_000
+) -> dict[str, Any]:
+    """Read a Markdown, plain-text or JSON file from a cached experiment, up to max_bytes."""
+    if max_bytes < 1:
+        raise ValueError(f"max_bytes must be at least 1, got {max_bytes}")
+    path = resolve_within(experiment_dir, relative_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"File not found: {relative_path}")
+    if path.suffix.lower() not in TEXT_FILE_SUFFIXES:
+        raise ValueError(_not_text_message(relative_path))
+
+    with path.open("rb") as handle:
+        data = handle.read(max_bytes + 1)
+    if b"\0" in data:
+        raise ValueError(_not_text_message(relative_path))
+    truncated = len(data) > max_bytes
+    data = data[:max_bytes]
+    # A cut can split a multi-byte character; drop that partial character, not more.
+    content = codecs.getincrementaldecoder("utf-8")(errors="replace").decode(
+        data, final=not truncated
+    )
+    return {
+        "path": relative_path,
+        "size_bytes": path.stat().st_size,
+        "bytes_returned": len(data),
+        "truncated": truncated,
+        "content": content,
+    }
+
+
+def _not_text_message(relative_path: str) -> str:
+    if relative_path.lower().endswith(".csv"):
+        return f"{relative_path} is a CSV; read it with read_experiment_metrics instead."
+    return (
+        f"{relative_path} is not a text file this tool reads "
+        f"({', '.join(TEXT_FILE_SUFFIXES)}). Binary files are listed but never opened."
+    )
+
+
+def _walk_files(experiment_dir: Path) -> list[tuple[str, Path]]:
+    """Return (relative path, path) for every file inside the experiment, sorted.
+
+    Symlinked folders are not followed, and symlinked files that point outside the
+    experiment are left out. The cache manifest is bookkeeping, not experiment data.
+    """
+    root = experiment_dir.resolve()
+    found: list[tuple[str, Path]] = []
+    for folder, _, names in os.walk(root):
+        for name in names:
+            path = Path(folder) / name
+            relative_path = path.relative_to(root).as_posix()
+            if relative_path == MANIFEST_NAME:
+                continue
+            if not path.is_file() or not path.resolve().is_relative_to(root):
+                continue
+            found.append((relative_path, path))
+    return sorted(found)
+
+
 def read_config_yaml(experiment_dir: Path, relative_path: str) -> dict[str, Any]:
     """Load a YAML config file from a cached experiment."""
     config_path = resolve_within(experiment_dir, relative_path)
@@ -101,11 +183,13 @@ def read_config_yaml(experiment_dir: Path, relative_path: str) -> dict[str, Any]
 
 
 def _find_docs(experiment_dir: Path) -> list[str]:
-    docs: list[str] = []
-    for doc_name in DOC_FILE_NAMES:
-        if (experiment_dir / doc_name).exists():
-            docs.append(doc_name)
-    return docs
+    """Markdown reports and READMEs at any depth, top-level ones first."""
+    docs = [
+        relative_path
+        for relative_path, path in _walk_files(experiment_dir)
+        if path.suffix.lower() in DOC_FILE_SUFFIXES
+    ]
+    return sorted(docs, key=lambda relative_path: (relative_path.count("/"), relative_path))
 
 
 def _find_run_directories(experiment_dir: Path) -> list[str]:
