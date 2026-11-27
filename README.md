@@ -18,7 +18,7 @@ If the environment already exists, update the install with:
 
 ```bash
 conda activate experiment-explorer-mcp
-pip install -e .
+pip install -e ".[plot,dev]"
 ```
 
 Confirm the Python used by MCP is the conda env interpreter:
@@ -63,15 +63,17 @@ Restart Cursor after updating MCP settings. In **Settings → MCP**, `experiment
 Add the same stdio server with the Claude Code CLI. Use the **absolute** path to the conda env Python:
 
 ```bash
-claude mcp add --transport stdio \
+claude mcp add --transport stdio experiment_explorer \
   --env EXPERIMENT_EXPLORER_S3_BUCKET=phage-match-ml-experiments \
   --env EXPERIMENT_EXPLORER_CACHE_DIR=/path/to/experiment_explorer/.cache \
-  experiment_explorer -- \
-  /path/to/miniconda3/envs/experiment-explorer-mcp/bin/python -m experiment_explorer
+  -- /path/to/miniconda3/envs/experiment-explorer-mcp/bin/python -m experiment_explorer
 ```
 
-- User-wide (default): omit `--scope`, or pass `--scope user`.
-- This repo only: add `--scope project` (writes `.mcp.json` in the project).
+Keep the server name before `--env`: `--env` takes every value up to the next option, so a name placed after it is read as a malformed variable.
+
+- Only you, only the current project (default): omit `--scope`, or pass `--scope local`.
+- You, in every project: add `--scope user`.
+- Everyone working in the current project: add `--scope project` (writes `.mcp.json` there, which can be committed).
 
 Check that it is registered:
 
@@ -89,7 +91,9 @@ Restart Claude Code after adding the server. You can also paste the same JSON as
 | `list_experiment_files` | List files under one experiment prefix |
 | `fetch_experiment` | Download an experiment folder to local cache |
 | `list_cached_experiments` | List experiments already downloaded locally |
-| `summarize_experiment` | Find README, run dirs, metrics, predictions, configs |
+| `summarize_experiment` | Find reports and READMEs at any depth, run dirs, metrics, predictions, configs |
+| `list_cached_files` | List every file in a cached experiment with its size |
+| `read_cached_file` | Read a Markdown, text, JSON, YAML or log file (size-limited; binaries are never opened) |
 | `read_experiment_metrics` | Load a metrics CSV (preview rows) |
 | `read_experiment_config` | Load a YAML config file |
 
@@ -99,7 +103,8 @@ Restart Claude Code after adding the server. You can also paste the same JSON as
 2. `fetch_experiment` with `experiment_name="2026-04-20_Baseline"`
 3. `summarize_experiment` — discover metrics file paths
 4. `read_experiment_metrics` — inspect `test_results.csv`, etc.
-5. Use the returned data for plotting or further analysis
+5. `list_cached_files` / `read_cached_file` — read written reports, notes and JSON summaries
+6. Use the returned data for plotting or further analysis
 
 ## Environment variables
 
@@ -137,7 +142,7 @@ pip install -e ".[plot]"
 python scripts/plot_roc_pr_curves.py --experiment-name 2026-07-16_ecoli_selected_features_holdout
 ```
 
-Figures are saved to `<experiment>/plots` unless you pass `--output-dir`. The script reads `predictions/{test,cv}_predictions.csv` in run folders and `predictions_normalized/<name>_{test,cv}.csv`.
+The script reads the same cache as the server (`EXPERIMENT_EXPLORER_CACHE_DIR`, or `.cache` in this folder); pass `--cache-dir` to use another. ROC curves are labelled with ROC AUC and precision-recall curves with average precision (AP). Figures are saved to `<experiment>/plots` unless you pass `--output-dir`. The script reads `predictions/{test,cv}_predictions.csv` in run folders and `predictions_normalized/<name>_{test,cv}.csv`.
 
 ## Local development
 

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
 
+# Records the S3 ETag and size of each downloaded file, so changes are detected.
+# It lives in each cached experiment folder but is bookkeeping, not experiment data.
+MANIFEST_NAME = ".s3_manifest.json"
+
 
 def validate_experiment_name(name: str) -> str:
     """Return an experiment name without its trailing slash, or raise ValueError.

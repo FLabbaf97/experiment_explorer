@@ -72,7 +72,11 @@ def test_reads_cannot_leave_the_experiment(call_tool, cache_dir, tmp_path, route
     for ext in ("csv", "yaml"):
         (cache_dir / "exp" / f"link.{ext}").symlink_to(cache_dir / "exp_secret" / f"secret.{ext}")
 
-    for tool, ext in (("read_experiment_metrics", "csv"), ("read_experiment_config", "yaml")):
+    for tool, ext in (
+        ("read_experiment_metrics", "csv"),
+        ("read_experiment_config", "yaml"),
+        ("read_cached_file", "yaml"),
+    ):
         relative_path = OUTSIDE_PATHS[route].format(ext=ext, outside=outside)
         result = call_tool(tool, experiment_name="exp", relative_path=relative_path)
 
